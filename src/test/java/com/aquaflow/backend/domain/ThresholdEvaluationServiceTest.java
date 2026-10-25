@@ -94,8 +94,8 @@ class ThresholdEvaluationServiceTest {
     }
 
     @Test
-    @DisplayName("Critical water deficiency triggers START_IRRIGATION")
-    void testCriticalWaterDeficiencyTriggersStart() {
+    @DisplayName("Critical water deficiency requests Arva AI assessment and never starts pump directly")
+    void testCriticalWaterDeficiencyRequestsAiAssessment() {
         when(autoConfigRepository.findByFieldId(1L)).thenReturn(Optional.of(testConfig));
 
         service.evaluateTelemetryThresholds(
@@ -107,7 +107,28 @@ class ThresholdEvaluationServiceTest {
                 "OK"
         );
 
-        verify(downlinkQueueService, atLeastOnce()).queueDownlink(eq(testNode), contains("START_IRRIGATION"), anyString());
+        // Verification: Sensor alone must NEVER actuate physical pump directly
+        verify(downlinkQueueService, never()).queueDownlink(eq(testNode), contains("START_IRRIGATION"), anyString());
+
+        // Verification: Alert / notification must be created requesting Arva AI assessment
+        verify(alertService, atLeastOnce()).createNotification(
+                eq("ASSESSMENT_REQUIRED"),
+                contains("Arva AI Assessment"),
+                anyString(),
+                eq("CRITICAL"),
+                eq("ai_advisor"),
+                eq(testNode.getNodeId()),
+                eq(1L),
+                any(),
+                any(),
+                eq("ARVA_AI"),
+                anyString(),
+                eq("ZONE"),
+                anyString(),
+                anyString(),
+                anyInt(),
+                any()
+        );
     }
 
     @Test

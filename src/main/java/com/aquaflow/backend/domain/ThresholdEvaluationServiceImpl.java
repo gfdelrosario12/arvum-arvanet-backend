@@ -249,52 +249,83 @@ public class ThresholdEvaluationServiceImpl implements ThresholdEvaluationServic
                 }
             }
         }
-        // 3. Rule Evaluation:
-        // Table:
-        // Critical water deficiency -> CRITICAL -> START
-        // Low water -> WARNING -> START if permitted
-        // Sufficient water -> INFO -> STOP if active
-        // Excess water -> WARNING -> STOP
-        // High-water conditions override low-moisture requests.
-        // Hysteresis & cooldown apply.
+        // 3. Sensor Observation Notification and Agricultural Assessment Trigger
+        // Architectural Invariant: Arva (Agricultural AI) determines irrigation start decisions.
+        // Sensor threshold breaches no longer directly actuate pumps. Instead:
+        // - Critical water deficiency or low water triggers an agricultural assessment recommendation notification for Arva.
+        // - Physical excess water (> targetFloodDepth + 3.0 cm) triggers immediate automated STOP_IRRIGATION safeguard.
+        // - Sensor failures/lockouts trigger immediate SAFE_STOP.
 
         double excessWaterThreshold = targetFloodDepth + 3.0; // Excess water > 8cm
         double sufficientWaterThreshold = targetFloodDepth;   // Sufficient water >= 5cm
         double lowWaterDepth = 1.0;                           // Depth < 1cm
         double criticalMoisture = minSoilMoisture - 10.0;     // Critical moisture < 20%
+        String zoneCode = node.getMonitoringZone() != null ? node.getMonitoringZone().getCode() : node.getNodeId();
 
         String actionToTake = null;
         String reason = null;
         String severity = "INFO";
 
         if (waterLevelCm > excessWaterThreshold) {
-            // Excess water: STOP
+            // Excess water: Immediate physical safety STOP safeguard
             actionToTake = "STOP_IRRIGATION";
-            reason = String.format("Excess water detected (%.1f cm > %.1f cm)", waterLevelCm, excessWaterThreshold);
+            reason = String.format("Excess water detected (%.1f cm > %.1f cm). Physical safety stop dispatched.", waterLevelCm, excessWaterThreshold);
             severity = "WARNING";
         } else if (waterLevelCm >= sufficientWaterThreshold && soilMoisture >= minSoilMoisture) {
-            // Sufficient water: STOP if active
+            // Sufficient water: STOP if active to prevent pond overfill
             String lastCmd = lastCommandTypeMap.get(node.getNodeId());
             if ("START_IRRIGATION".equals(lastCmd)) {
                 actionToTake = "STOP_IRRIGATION";
-                reason = String.format("Sufficient water reached (depth: %.1f cm, moisture: %.1f%%)", waterLevelCm, soilMoisture);
+                reason = String.format("Sufficient water reached (depth: %.1f cm, moisture: %.1f%%). Irrigation completed.", waterLevelCm, soilMoisture);
                 severity = "INFO";
             }
         } else if (soilMoisture < criticalMoisture || waterLevelCm <= -15.0) {
-            // Critical water deficiency: START
-            // High water overrides: Only start if water level is not high
-            if (waterLevelCm < targetFloodDepth) {
-                actionToTake = "START_IRRIGATION";
-                reason = String.format("Critical water deficiency: moisture %.1f%%, water level %.1f cm", soilMoisture, waterLevelCm);
-                severity = "CRITICAL";
+            // Critical water deficiency: Arva AI assessment required
+            log.info("AWD safe drying threshold breached for node {} (level: {} cm, moisture: {}%). Arva AI assessment requested.",
+                    node.getNodeId(), waterLevelCm, soilMoisture);
+            if (alertService != null) {
+                alertService.createNotification(
+                        "ASSESSMENT_REQUIRED",
+                        "Arva AI Assessment: AWD Reflood Recommended",
+                        String.format("Node %s observed water level %.1f cm (threshold -15.0 cm) and moisture %.1f%%. Arva AI recommends reviewing reflood schedule.",
+                                node.getNodeId(), waterLevelCm, soilMoisture),
+                        "CRITICAL",
+                        "ai_advisor",
+                        node.getNodeId(),
+                        fieldId,
+                        node.getMonitoringZone() != null ? node.getMonitoringZone().getId() : null,
+                        zoneCode,
+                        "ARVA_AI",
+                        "Arva Agricultural Advisor",
+                        "ZONE",
+                        "Open Arva in ArvaLink to review agronomic rationale and authorize reflooding.",
+                        "AI_ASSESS:" + node.getNodeId(),
+                        15,
+                        null
+                );
             }
         } else if (soilMoisture < minSoilMoisture || waterLevelCm < lowWaterDepth) {
-            // Low water: START if permitted
-            if (waterLevelCm < targetFloodDepth) {
-                actionToTake = "START_IRRIGATION";
-                reason = String.format("Low water threshold reached: moisture %.1f%% (< %.1f%%), water level %.1f cm",
-                        soilMoisture, minSoilMoisture, waterLevelCm);
-                severity = "WARNING";
+            // Low water: Farmer awareness notification
+            if (alertService != null) {
+                alertService.createNotification(
+                        "MONITOR",
+                        "Field Drying Observation",
+                        String.format("Node %s observed water level %.1f cm, moisture %.1f%%. Safe AWD drying active.",
+                                node.getNodeId(), waterLevelCm, soilMoisture),
+                        "INFO",
+                        "monitoring",
+                        node.getNodeId(),
+                        fieldId,
+                        node.getMonitoringZone() != null ? node.getMonitoringZone().getId() : null,
+                        zoneCode,
+                        "ARVA_NODE",
+                        "ArvaNode Observation Subsystem",
+                        "ZONE",
+                        "Continuous AWD monitoring.",
+                        "OBSERVATION:" + node.getNodeId(),
+                        30,
+                        null
+                );
             }
         }
 
