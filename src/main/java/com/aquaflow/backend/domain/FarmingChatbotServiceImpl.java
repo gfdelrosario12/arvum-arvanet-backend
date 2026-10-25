@@ -34,7 +34,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     private final IrrigationAuditLogRepository auditLogRepository;
     private final ObjectMapper objectMapper;
 
-    public static final String INITIAL_QUESTION = "What do you want to plant today?";
+    public static final String INITIAL_QUESTION = "Hi, I am Arva, what do you like to plant today?";
     public static final String PROCEED_QUESTION = "Do you want to proceed with the proposed planting preparation?";
 
     @Override
