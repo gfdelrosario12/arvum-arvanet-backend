@@ -62,6 +62,10 @@ public class RealtimeSseBroadcaster {
         broadcast("notification.created", notification);
     }
 
+    public void broadcastEvent(String eventName, Object data) {
+        broadcast(eventName, data);
+    }
+
     private void broadcast(String eventName, Object data) {
         if (emitters.isEmpty()) return;
 

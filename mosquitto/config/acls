@@ -1,18 +1,84 @@
 # =============================================================================
-# Mosquitto Access Control Lists (ACLs) - ArvaCore Ecosystem
+# Mosquitto Access Control Lists (ACLs) - ArvaCore IoT Core Platform
+# Restricts topics per node identity, separating node uplinks from backend commands
 # =============================================================================
 
-# --- Anonymous / Development Mode Fallback ---
-# Telemetry uplinks from nodes and gateway
-topic readwrite arvacore/telemetry/#
-topic readwrite node/+/telemetry
+# --- Backend Administrative Client (Full Read/Write) ---
+user aquaflow-backend
+topic readwrite arvacore/#
+topic readwrite arvacore/v1/devices/#
+topic readwrite node/#
+topic readwrite sensor/#
+topic readwrite device/#
+topic readwrite actuator/#
+topic read $SYS/#
 
-# Gateway status and heartbeat
-topic readwrite arvacore/gateway/#
+# --- ARVANODE-001 ---
+user node_arvanode_001
+topic write arvacore/v1/devices/ARVANODE-001/telemetry
+topic write arvacore/v1/devices/ARVANODE-001/status
+topic write arvacore/v1/devices/ARVANODE-001/events
+topic write arvacore/v1/devices/ARVANODE-001/command-results
+topic read arvacore/v1/devices/ARVANODE-001/commands
+# Backward compatibility topics
+topic write node/ARVANODE-001/telemetry
+topic write node/ARVANODE-001/event
 
-# Actuation commands and state machine downlinks
-topic readwrite arvacore/commands/#
-topic readwrite arvacore/actuation/#
+# --- ARVANODE-002 ---
+user node_arvanode_002
+topic write arvacore/v1/devices/ARVANODE-002/telemetry
+topic write arvacore/v1/devices/ARVANODE-002/status
+topic write arvacore/v1/devices/ARVANODE-002/events
+topic write arvacore/v1/devices/ARVANODE-002/command-results
+topic read arvacore/v1/devices/ARVANODE-002/commands
+topic write node/ARVANODE-002/telemetry
+topic write node/ARVANODE-002/event
 
-# Realtime broadcast topics
-topic readwrite arvacore/broadcast/#
+# --- ARVANODE-003 ---
+user node_arvanode_003
+topic write arvacore/v1/devices/ARVANODE-003/telemetry
+topic write arvacore/v1/devices/ARVANODE-003/status
+topic write arvacore/v1/devices/ARVANODE-003/events
+topic write arvacore/v1/devices/ARVANODE-003/command-results
+topic read arvacore/v1/devices/ARVANODE-003/commands
+topic write node/ARVANODE-003/telemetry
+topic write node/ARVANODE-003/event
+
+# --- ARVANODE-004 ---
+user node_arvanode_004
+topic write arvacore/v1/devices/ARVANODE-004/telemetry
+topic write arvacore/v1/devices/ARVANODE-004/status
+topic write arvacore/v1/devices/ARVANODE-004/events
+topic write arvacore/v1/devices/ARVANODE-004/command-results
+topic read arvacore/v1/devices/ARVANODE-004/commands
+topic write node/ARVANODE-004/telemetry
+topic write node/ARVANODE-004/event
+
+# --- ARVANODE-005 ---
+user node_arvanode_005
+topic write arvacore/v1/devices/ARVANODE-005/telemetry
+topic write arvacore/v1/devices/ARVANODE-005/status
+topic write arvacore/v1/devices/ARVANODE-005/events
+topic write arvacore/v1/devices/ARVANODE-005/command-results
+topic read arvacore/v1/devices/ARVANODE-005/commands
+topic write node/ARVANODE-005/telemetry
+topic write node/ARVANODE-005/event
+
+# --- ARVANODE-006 ---
+user node_arvanode_006
+topic write arvacore/v1/devices/ARVANODE-006/telemetry
+topic write arvacore/v1/devices/ARVANODE-006/status
+topic write arvacore/v1/devices/ARVANODE-006/events
+topic write arvacore/v1/devices/ARVANODE-006/command-results
+topic read arvacore/v1/devices/ARVANODE-006/commands
+topic write node/ARVANODE-006/telemetry
+topic write node/ARVANODE-006/event
+
+# --- ARVAGATE-CTRL-01 (Gateway Controller) ---
+user gate_arvagate_01
+topic write arvacore/v1/devices/ARVAGATE-CTRL-01/status
+topic write arvacore/v1/devices/ARVAGATE-CTRL-01/events
+topic write arvacore/v1/devices/ARVAGATE-CTRL-01/command-results
+topic read arvacore/v1/devices/ARVAGATE-CTRL-01/commands
+topic write arvacore/gateway/status
+topic write arvacore/gateway/telemetry
