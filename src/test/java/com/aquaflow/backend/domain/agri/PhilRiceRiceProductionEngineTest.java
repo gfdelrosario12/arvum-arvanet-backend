@@ -90,5 +90,31 @@ public class PhilRiceRiceProductionEngineTest {
         assertEquals(PhilRiceRiceProductionEngine.ReadinessAssessment.ReadinessStatus.SUITABLE, eval.getStatus());
         assertTrue(eval.getReasons().get(0).contains("21-day wetland preparation requirement"));
     }
+
+    @Test
+    void testGrowthStageGuidelineFloweringRequiresContinuousSubmergence() {
+        // DAT 70 is in Heading and Flowering stage
+        PhilRiceRiceProductionEngine.GrowthStageGuideline guideline =
+                PhilRiceRiceProductionEngine.getGrowthStageGuideline(70);
+
+        assertEquals("STAGE_5_6", guideline.getStageCode());
+        assertFalse(guideline.isAwdPermitted());
+        assertEquals(3.0, guideline.getMinWaterDepthCm());
+        assertEquals(5.0, guideline.getMaxWaterDepthCm());
+        assertTrue(guideline.getWaterManagementStrategy().contains("CRITICAL SENSITIVE STAGE"));
+    }
+
+    @Test
+    void testGrowthStageGuidelineTerminalDrainageBeforeHarvest() {
+        // DAT 100 is in mature grain stage
+        PhilRiceRiceProductionEngine.GrowthStageGuideline guideline =
+                PhilRiceRiceProductionEngine.getGrowthStageGuideline(100);
+
+        assertEquals("STAGE_9", guideline.getStageCode());
+        assertEquals(0.0, guideline.getMinWaterDepthCm());
+        assertEquals(0.0, guideline.getMaxWaterDepthCm());
+        assertTrue(guideline.getWaterManagementStrategy().contains("TERMINAL DRAINAGE"));
+        assertTrue(guideline.getNutrientAction().contains("80-85% grains straw-colored"));
+    }
 }
 

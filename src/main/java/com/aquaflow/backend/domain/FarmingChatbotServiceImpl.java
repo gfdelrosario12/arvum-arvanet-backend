@@ -138,9 +138,36 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 PlantingPlan plan = planRepository.findTopBySessionIdOrderByUpdatedAtDesc(session.getSessionId())
                         .orElseGet(() -> generatePlantingPlan(session, fieldId));
 
-                String reply = String.format("Current plan for %s is active (%d%% readiness). Continue tracking tasks and water depth.", session.getSelectedCrop(), plan.getReadinessScore());
+                String lower = msg.toLowerCase();
+                String reply;
+
+                if (lower.contains("harvest") || lower.contains("mature") || lower.contains("thresh") || lower.contains("dry")) {
+                    reply = "🌾 PhilRice Harvest & Postharvest Advisory:\n" +
+                            "• Readiness Criteria: 80-85% of grains on panicles are straw-colored/yellow; grains at base at hard dough; kernels clear and translucent.\n" +
+                            "• Terminal Drainage: Cut off irrigation and drain standing water completely 7-10 days before expected harvest.\n" +
+                            "• Postharvest: Thresh immediately within 24 hours of cutting to avoid discoloration. Dry palay in 4-5 cm layers to 14% moisture content.";
+                } else if (lower.contains("fertilizer") || lower.contains("nutrient") || lower.contains("nitrogen") || lower.contains("urea") || lower.contains("zinc") || lower.contains("lcc") || lower.contains("moet")) {
+                    reply = "🌱 PhilRice Integrated Nutrient Management (INM) Advisory:\n" +
+                            "• Nitrogen (N): Use Leaf Color Chart (LCC threshold = 4) to guide topdressings. Split into 3-4 applications in dry season, 2-3 in wet season.\n" +
+                            "• Phosphorus (P): Apply 100% basal at final harrowing.\n" +
+                            "• Potassium (K): Apply 50% basal at harrowing, 50% at early panicle initiation (EPI).\n" +
+                            "• Zinc: Apply 10-25 kg/ha Zinc Sulfate within 10-14 days after transplanting.";
+                } else if (lower.contains("pest") || lower.contains("insect") || lower.contains("snail") || lower.contains("kuhol") || lower.contains("disease") || lower.contains("weed")) {
+                    reply = "🛡️ PhilRice Integrated Pest Management (IPM) Advisory:\n" +
+                            "• Golden Apple Snail (Kuhol): Maintain shallow 1-2 cm water depth during first 2 weeks after transplanting; install wire screens at canal inlets.\n" +
+                            "• Weed Management: Maintain 2-3 cm continuous water blanket 3-4 days after transplanting to suppress weed seeds; rotary weed at 15-20 DAT.\n" +
+                            "• Stem Borer & Blast: Avoid excessive nitrogen; balance potassium and maintain field sanitation.";
+                } else if (lower.contains("water") || lower.contains("irrigation") || lower.contains("awd") || lower.contains("depth") || lower.contains("stage")) {
+                    reply = "💧 Growth-Stage Irrigation & AWD Advisory:\n" +
+                            "• Vegetative & Tillering: Maintain 2-3 cm shallow depth. Safe drying down to -15 cm (AWD) promotes deep root anchorage.\n" +
+                            "• Flowering & Panicle Initiation: CRITICAL! Keep continuously flooded at 3-5 cm. Moisture stress at flowering causes spikelet sterility.\n" +
+                            "• Terminal Drainage: Drain all standing water 7-10 days before harvest.";
+                } else {
+                    reply = String.format("Current plan for %s is active (%d%% readiness). Continue tracking tasks and field water depth.", session.getSelectedCrop(), plan.getReadinessScore());
+                }
+
                 recordMessage(session.getSessionId(), "ASSISTANT", reply);
-                response = buildPlanResponse(session, plan, reply, "Keep monitoring field readiness.", false, role);
+                response = buildPlanResponse(session, plan, reply, "Keep monitoring field readiness and growth stages.", false, role);
             }
             default -> {
                 response = resetSession(session.getSessionId(), fieldId, authentication);

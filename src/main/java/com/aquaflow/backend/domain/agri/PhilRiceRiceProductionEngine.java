@@ -301,6 +301,127 @@ public class PhilRiceRiceProductionEngine {
         return tasks;
     }
 
+    @Data
+    @Builder
+    public static class GrowthStageGuideline {
+        private String stageCode;
+        private String stageName;
+        private int minDaysAfterTransplanting;
+        private int maxDaysAfterTransplanting;
+        private double minWaterDepthCm;
+        private double maxWaterDepthCm;
+        private String waterManagementStrategy;
+        private String nutrientAction;
+        private String pestDiseaseAction;
+        private boolean isAwdPermitted;
+        private String citation;
+    }
+
+    /**
+     * Complete PhilRice growth-stage-specific management matrix (Modules 3, 7, 8, 10, 12, 14, 16, 19).
+     */
+    public static GrowthStageGuideline getGrowthStageGuideline(int daysAfterTransplanting) {
+        if (daysAfterTransplanting <= 7) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_1B")
+                    .stageName("Transplanting Recovery & Root Anchorage")
+                    .minDaysAfterTransplanting(0)
+                    .maxDaysAfterTransplanting(7)
+                    .minWaterDepthCm(1.0)
+                    .maxWaterDepthCm(2.0)
+                    .waterManagementStrategy("Maintain shallow 1-2 cm depth or soil saturation. Do not flood deeply to prevent drowning young seedlings and restricting snail mobility.")
+                    .nutrientAction("Recheck basal fertilizer incorporation (100% P, 50% K). Apply 10-25 kg/ha Zinc Sulfate within 10-14 DAT.")
+                    .pestDiseaseAction("Golden Apple Snail (Kuhol) critical window: Maintain shallow water, screen canal inlets, deploy bamboo stakes for egg collection.")
+                    .isAwdPermitted(false)
+                    .citation("PhilRice Training Manual (2003), Module 7, p. 71; Module 16, p. 168.")
+                    .build();
+        } else if (daysAfterTransplanting <= 35) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_2")
+                    .stageName("Active Tillering & Early Vegetative Phase")
+                    .minDaysAfterTransplanting(8)
+                    .maxDaysAfterTransplanting(35)
+                    .minWaterDepthCm(2.0)
+                    .maxWaterDepthCm(3.0)
+                    .waterManagementStrategy("Maintain 2-3 cm shallow water depth. Alternate Wetting and Drying (AWD) safe drying down to -15 cm permitted. Aeration stimulates deep root anchorage.")
+                    .nutrientAction("Evaluate leaf color at 21-28 DAT with Leaf Color Chart (LCC). Topdress Nitrogen (Urea/Ammon) if LCC < 4. Max 40 kg N/ha.")
+                    .pestDiseaseAction("Weed management: Rotary weeding along rows at 15-20 DAT. Monitor whorl maggot and vegetative deadhearts (stem borer).")
+                    .isAwdPermitted(true)
+                    .citation("PhilRice Training Manual (2003), Module 3, p. 42; Module 7, p. 71; Module 8, p. 83.")
+                    .build();
+        } else if (daysAfterTransplanting <= 50) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_3")
+                    .stageName("Stem Elongation & Maximum Tillering")
+                    .minDaysAfterTransplanting(36)
+                    .maxDaysAfterTransplanting(50)
+                    .minWaterDepthCm(3.0)
+                    .maxWaterDepthCm(5.0)
+                    .waterManagementStrategy("Gradually increase ponded water to 3-5 cm. Continue AWD cycling between 5 cm reflood and -15 cm perched table drawdown.")
+                    .nutrientAction("Monitor tiller count and LCC. Avoid late heavy nitrogen that causes vegetative lodging.")
+                    .pestDiseaseAction("Monitor sheath blight and leaf blast lesions. Rogue diseased hills.")
+                    .isAwdPermitted(true)
+                    .citation("PhilRice Training Manual (2003), Module 3, p. 43; Module 7, p. 72.")
+                    .build();
+        } else if (daysAfterTransplanting <= 65) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_4")
+                    .stageName("Panicle Initiation to Booting")
+                    .minDaysAfterTransplanting(51)
+                    .maxDaysAfterTransplanting(65)
+                    .minWaterDepthCm(3.0)
+                    .maxWaterDepthCm(5.0)
+                    .waterManagementStrategy("CRITICAL STAGE: SUSPEND AWD DRYING. Keep field continuously submerged under 3-5 cm ponded water. Plant is highly vulnerable to moisture stress.")
+                    .nutrientAction("Apply remaining 50% Potassium (Muriate of Potash) and 3rd Nitrogen split (Early Panicle Initiation topdressing).")
+                    .pestDiseaseAction("Check for stem borer egg masses; protect flag leaf from bacterial leaf blight.")
+                    .isAwdPermitted(false)
+                    .citation("PhilRice Training Manual (2003), Module 3, p. 43; Module 7, p. 75; Module 8, p. 83.")
+                    .build();
+        } else if (daysAfterTransplanting <= 80) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_5_6")
+                    .stageName("Heading and Flowering")
+                    .minDaysAfterTransplanting(66)
+                    .maxDaysAfterTransplanting(80)
+                    .minWaterDepthCm(3.0)
+                    .maxWaterDepthCm(5.0)
+                    .waterManagementStrategy("CRITICAL SENSITIVE STAGE: ZERO DRYING ALLOWED. Maintain 3-5 cm standing water continuously. Moisture stress causes unfertilized blank grains/whiteheads.")
+                    .nutrientAction("No further nitrogen unless flag leaves are severely pale (LCC < 3).")
+                    .pestDiseaseAction("Monitor rice bug (Atangya) during milk stage. Avoid pesticide spraying during peak morning anthesis (8-11 AM).")
+                    .isAwdPermitted(false)
+                    .citation("PhilRice Training Manual (2003), Module 3, p. 44; Module 7, p. 75; Module 10, p. 108.")
+                    .build();
+        } else if (daysAfterTransplanting <= 95) {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_7_8")
+                    .stageName("Milk to Dough Grain Ripening")
+                    .minDaysAfterTransplanting(81)
+                    .maxDaysAfterTransplanting(95)
+                    .minWaterDepthCm(2.0)
+                    .maxWaterDepthCm(3.0)
+                    .waterManagementStrategy("Maintain shallow 2-3 cm depth or saturated soil. Grains actively accumulating starch.")
+                    .nutrientAction("No fertilizer application permitted.")
+                    .pestDiseaseAction("Monitor rat activity and bird feeding; repair perimeter baiting traps.")
+                    .isAwdPermitted(true)
+                    .citation("PhilRice Training Manual (2003), Module 3, p. 45; Module 7, p. 71.")
+                    .build();
+        } else {
+            return GrowthStageGuideline.builder()
+                    .stageCode("STAGE_9")
+                    .stageName("Mature Grain & Terminal Drainage")
+                    .minDaysAfterTransplanting(96)
+                    .maxDaysAfterTransplanting(115)
+                    .minWaterDepthCm(0.0)
+                    .maxWaterDepthCm(0.0)
+                    .waterManagementStrategy("TERMINAL DRAINAGE: Completely cut off irrigation and drain paddies 7-10 days before expected harvest. Induces uniform ripening and solidifies field floor for mechanical harvesting.")
+                    .nutrientAction("Harvest readiness: 80-85% grains straw-colored/yellow; grains at base at hard dough; kernels clear & translucent.")
+                    .pestDiseaseAction("Harvest timely at 28-34 days after heading (DS) or 30-42 days after heading (WS). Thresh immediately within 24h to avoid grain discoloration. Dry to 14% moisture.")
+                    .isAwdPermitted(false)
+                    .citation("PhilRice Training Manual (2003), Module 7, p. 71; Module 19, pp. 188-196.")
+                    .build();
+        }
+    }
+
     /**
      * Evaluates planting readiness based on PhilRice agronomic criteria,
      * available prep time, water availability, and telemetry.
