@@ -21,6 +21,12 @@ public class MqttConfig {
     @Value("${MQTT_BROKER_URL:tcp://localhost:1883}")
     private String mqttBrokerUrl;
 
+    @Value("${MQTT_USERNAME:aquaflow-backend}")
+    private String mqttUsername;
+
+    @Value("${MQTT_PASSWORD:ArvaBackendSecret2026!}")
+    private String mqttPassword;
+
     private static final String CLIENT_ID = "aquaflow-backend";
 
     @Bean
@@ -28,8 +34,12 @@ public class MqttConfig {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
         MqttConnectOptions options = new MqttConnectOptions();
         options.setServerURIs(new String[] { mqttBrokerUrl });
-        options.setUserName("");
-        options.setPassword("".toCharArray());
+        if (mqttUsername != null && !mqttUsername.isBlank()) {
+            options.setUserName(mqttUsername);
+        }
+        if (mqttPassword != null && !mqttPassword.isBlank()) {
+            options.setPassword(mqttPassword.toCharArray());
+        }
         factory.setConnectionOptions(options);
         return factory;
     }
