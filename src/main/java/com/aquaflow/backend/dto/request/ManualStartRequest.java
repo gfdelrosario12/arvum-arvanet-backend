@@ -33,5 +33,8 @@ public class ManualStartRequest {
 
     @Builder.Default
     private Boolean overridePolicy = false;
+
+    @Builder.Default
+    private Boolean simulationMode = false;
 }
 

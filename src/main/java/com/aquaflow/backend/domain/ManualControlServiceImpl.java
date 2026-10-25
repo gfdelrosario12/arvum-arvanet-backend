@@ -89,17 +89,53 @@ public class ManualControlServiceImpl implements ManualControlService {
         String correlationId = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
 
+        boolean isSimulation = Boolean.TRUE.equals(request.getSimulationMode());
+
         if (stateMachine != null) {
             try {
                 stateMachine.registerCommand(correlationId, "MANUAL_START", field.getId(), null, request.getOperatorId(), request.getRationale());
-                stateMachine.transitionState(correlationId, CommandState.QUEUED, request.getOperatorId(), "Manual start queued", null, request.getOperatorId(), "OPERATOR");
+                stateMachine.transitionState(correlationId, isSimulation ? CommandState.COMPLETED : CommandState.QUEUED,
+                        request.getOperatorId(), isSimulation ? "Simulated workflow test passed" : "Manual start queued", null, request.getOperatorId(), "OPERATOR");
             } catch (Exception e) {
                 log.warn("Failed to register manual start state transition: {}", e.getMessage());
             }
         }
 
-        // 1. Log audit entry
-        saveAuditLog("MANUAL_IRRIGATION_START", request.getOperatorId(), "FIELD", field.getId().toString(), request);
+        // 1. Log audit entry (clearly separated if in simulation)
+        saveAuditLog(isSimulation ? "SIMULATED_MANUAL_IRRIGATION_START" : "MANUAL_IRRIGATION_START",
+                request.getOperatorId(), "FIELD", field.getId().toString(), request);
+
+        // 2. Hardware intercept for simulation mode: bypass LoRaWAN/MQTT downlink dispatch
+        if (isSimulation) {
+            log.info("SIMULATION MODE ACTIVE: Bypassing physical actuator downlinks for correlationId: {}", correlationId);
+            CommandStatusResponse simResponse = CommandStatusResponse.builder()
+                    .correlationId(correlationId)
+                    .fieldId(field.getId())
+                    .operatorId(request.getOperatorId())
+                    .status(CommandLifecycleState.EXECUTED)
+                    .commandType("MANUAL_START")
+                    .rationale(request.getRationale())
+                    .details("Workflow Test Passed — Irrigation activation was processed successfully in simulation mode. No physical device was activated.")
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+
+            statusTracker.put(correlationId, simResponse);
+
+            if (systemEventPublisher != null) {
+                try {
+                    systemEventPublisher.publish(SystemEvent.builder()
+                            .eventType(SystemEventType.IRRIGATION_EXECUTION_UPDATED)
+                            .fieldId(field.getId())
+                            .aggregateId(correlationId)
+                            .payload(simResponse)
+                            .build());
+                } catch (Exception e) {
+                    log.warn("Failed to publish simulation event for manual start: {}", e.getMessage());
+                }
+            }
+            return simResponse;
+        }
 
         // 2. Build payload JSON
         String payloadJson;
@@ -167,17 +203,53 @@ public class ManualControlServiceImpl implements ManualControlService {
         String correlationId = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
 
+        boolean isSimulation = Boolean.TRUE.equals(request.getSimulationMode());
+
         if (stateMachine != null) {
             try {
                 stateMachine.registerCommand(correlationId, "MANUAL_STOP", field.getId(), null, request.getOperatorId(), request.getRationale());
-                stateMachine.transitionState(correlationId, CommandState.QUEUED, request.getOperatorId(), "Manual stop queued", null, request.getOperatorId(), "OPERATOR");
+                stateMachine.transitionState(correlationId, isSimulation ? CommandState.COMPLETED : CommandState.QUEUED,
+                        request.getOperatorId(), isSimulation ? "Simulated workflow test passed" : "Manual stop queued", null, request.getOperatorId(), "OPERATOR");
             } catch (Exception e) {
                 log.warn("Failed to register manual stop state transition: {}", e.getMessage());
             }
         }
 
         // 1. Log audit entry
-        saveAuditLog("MANUAL_IRRIGATION_STOP", request.getOperatorId(), "FIELD", field.getId().toString(), request);
+        saveAuditLog(isSimulation ? "SIMULATED_MANUAL_IRRIGATION_STOP" : "MANUAL_IRRIGATION_STOP",
+                request.getOperatorId(), "FIELD", field.getId().toString(), request);
+
+        // 2. Hardware intercept for simulation mode: bypass LoRaWAN/MQTT downlink dispatch
+        if (isSimulation) {
+            log.info("SIMULATION MODE ACTIVE: Bypassing physical actuator downlinks for correlationId: {}", correlationId);
+            CommandStatusResponse simResponse = CommandStatusResponse.builder()
+                    .correlationId(correlationId)
+                    .fieldId(field.getId())
+                    .operatorId(request.getOperatorId())
+                    .status(CommandLifecycleState.EXECUTED)
+                    .commandType("MANUAL_STOP")
+                    .rationale(request.getRationale())
+                    .details("Workflow Test Passed — Irrigation deactivation was processed successfully in simulation mode. No physical device was activated.")
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+
+            statusTracker.put(correlationId, simResponse);
+
+            if (systemEventPublisher != null) {
+                try {
+                    systemEventPublisher.publish(SystemEvent.builder()
+                            .eventType(SystemEventType.IRRIGATION_EXECUTION_UPDATED)
+                            .fieldId(field.getId())
+                            .aggregateId(correlationId)
+                            .payload(simResponse)
+                            .build());
+                } catch (Exception e) {
+                    log.warn("Failed to publish simulation event for manual stop: {}", e.getMessage());
+                }
+            }
+            return simResponse;
+        }
 
         // 2. Build payload JSON
         String payloadJson;

@@ -3,7 +3,9 @@ package com.aquaflow.backend.domain;
 import com.aquaflow.backend.dto.request.EmergencyStopRequest;
 import com.aquaflow.backend.dto.response.CommandStatusResponse;
 import com.aquaflow.backend.entity.*;
+import com.aquaflow.backend.infrastructure.event.SystemEvent;
 import com.aquaflow.backend.infrastructure.event.SystemEventPublisher;
+import com.aquaflow.backend.infrastructure.event.SystemEventType;
 import com.aquaflow.backend.infrastructure.exception.ResourceNotFoundException;
 import com.aquaflow.backend.infrastructure.exception.ValidationException;
 import com.aquaflow.backend.persistence.*;
@@ -93,17 +95,49 @@ public class EmergencyStopServiceImpl implements EmergencyStopService {
 
         String correlationId = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
+        boolean isSimulation = Boolean.TRUE.equals(request.getSimulationMode());
 
         if (stateMachine != null) {
             stateMachine.registerCommand(correlationId, "EMERGENCY_STOP", targetFieldId, null, request.getOperatorId(), request.getReason());
-            stateMachine.transitionState(correlationId, CommandState.QUEUED, request.getOperatorId(), request.getReason(), null, request.getOperatorId(), "ROLE_ADMIN");
+            stateMachine.transitionState(correlationId, isSimulation ? CommandState.COMPLETED : CommandState.QUEUED,
+                    request.getOperatorId(), isSimulation ? "Simulated emergency stop passed" : request.getReason(), null, request.getOperatorId(), "ROLE_ADMIN");
         }
 
         // 1. Log audit entry for emergency stop
-        saveAuditLog("EMERGENCY_STOP", request.getOperatorId(),
+        saveAuditLog(isSimulation ? "SIMULATED_EMERGENCY_STOP" : "EMERGENCY_STOP", request.getOperatorId(),
                 targetFieldId != null ? "FIELD" : "SYSTEM",
                 targetFieldId != null ? targetFieldId.toString() : "ALL",
                 request);
+
+        // Simulation Mode: Intercept before physical LoRaWAN/MQTT downlink dispatch
+        if (isSimulation) {
+            log.info("SIMULATION MODE ACTIVE: Bypassing physical actuator downlinks for Emergency Stop correlationId: {}", correlationId);
+            CommandStatusResponse simResponse = CommandStatusResponse.builder()
+                    .correlationId(correlationId)
+                    .fieldId(targetFieldId)
+                    .operatorId(request.getOperatorId())
+                    .status(CommandLifecycleState.EXECUTED)
+                    .commandType("EMERGENCY_STOP")
+                    .rationale(request.getReason())
+                    .details("Workflow Test Passed — Emergency stop was processed successfully in simulation mode. No physical device was activated.")
+                    .createdAt(now)
+                    .updatedAt(now)
+                    .build();
+
+            if (systemEventPublisher != null) {
+                try {
+                    systemEventPublisher.publish(SystemEvent.builder()
+                            .eventType(SystemEventType.EMERGENCY_STOP_ACTIVATED)
+                            .fieldId(targetFieldId)
+                            .aggregateId(correlationId)
+                            .payload(simResponse)
+                            .build());
+                } catch (Exception e) {
+                    log.warn("Failed to publish simulated emergency stop event: {}", e.getMessage());
+                }
+            }
+            return simResponse;
+        }
 
         // 2. Build emergency payload JSON
         String payloadJson;

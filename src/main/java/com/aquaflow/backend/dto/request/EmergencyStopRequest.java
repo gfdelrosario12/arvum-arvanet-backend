@@ -21,5 +21,8 @@ public class EmergencyStopRequest {
     private String reason;
 
     private String scope; // "FIELD" or "SYSTEM_WIDE"
+
+    @Builder.Default
+    private Boolean simulationMode = false;
 }
 

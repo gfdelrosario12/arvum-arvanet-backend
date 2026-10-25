@@ -21,5 +21,8 @@ public class ManualStopRequest {
 
     @NotBlank(message = "Rationale is required")
     private String rationale;
+
+    @Builder.Default
+    private Boolean simulationMode = false;
 }
 
