@@ -1,12 +1,11 @@
 -- Migration V25: Persistent Pre-Irrigation Preparation Schedules, Task Lifecycles, and Irrigation Event Associations
 
 -- 1. Extend planting_tasks with lifecycle states, deadlines, priority, and outcomes
-ALTER TABLE planting_tasks 
-    ADD COLUMN IF NOT EXISTS deadline TIMESTAMP WITH TIME ZONE,
-    ADD COLUMN IF NOT EXISTS priority VARCHAR(50) NOT NULL DEFAULT 'NORMAL',
-    ADD COLUMN IF NOT EXISTS evidence_source VARCHAR(255),
-    ADD COLUMN IF NOT EXISTS completion_evidence TEXT,
-    ADD COLUMN IF NOT EXISTS associated_irrigation_command_id VARCHAR(64);
+ALTER TABLE planting_tasks ADD COLUMN IF NOT EXISTS deadline TIMESTAMP WITH TIME ZONE;
+ALTER TABLE planting_tasks ADD COLUMN IF NOT EXISTS priority VARCHAR(50) NOT NULL DEFAULT 'NORMAL';
+ALTER TABLE planting_tasks ADD COLUMN IF NOT EXISTS evidence_source VARCHAR(255);
+ALTER TABLE planting_tasks ADD COLUMN IF NOT EXISTS completion_evidence TEXT;
+ALTER TABLE planting_tasks ADD COLUMN IF NOT EXISTS associated_irrigation_command_id VARCHAR(64);
 
 -- 2. Create pre_irrigation_plans table for scheduling upcoming irrigation preparations
 CREATE TABLE IF NOT EXISTS pre_irrigation_plans (

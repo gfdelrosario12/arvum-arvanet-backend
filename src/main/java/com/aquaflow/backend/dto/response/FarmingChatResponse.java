@@ -35,6 +35,25 @@ public class FarmingChatResponse {
     private Boolean canViewAuditLogs;
     private List<String> authorizedCapabilities;
 
+    // Workflow Engine & Task Lifecycle Context (S01-S13)
+    private String taskLifecycleStatus;
+    private List<WorkflowStepDto> workflowSteps;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class WorkflowStepDto {
+        private String stepCode;
+        private String name;
+        private String status; // PENDING, ELIGIBLE, WAITING, IN_PROGRESS, COMPLETED, FAILED, BLOCKED, SKIPPED, INVALIDATED
+        private List<String> dependsOn;
+        private String blockingReason;
+        private String skipReason;
+        private Boolean requiresUserDecision;
+        private Boolean isRemediation;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -46,6 +65,9 @@ public class FarmingChatResponse {
         private String description;
         private String status;
         private String blockingReason;
+        private String priority;
+        private String deadline;
+        private String evidenceSource;
         private Boolean requiresConfirmation;
     }
 }

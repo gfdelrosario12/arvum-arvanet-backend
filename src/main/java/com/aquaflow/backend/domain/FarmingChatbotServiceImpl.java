@@ -107,6 +107,14 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                     break;
                 }
 
+                // If user does not explicitly request planning or select a crop, maintain natural conversation
+                if (!isExplicitPlanningRequest(msg, request.getSelectedCrop())) {
+                    String naturalReply = getNaturalConversationalReply(msg);
+                    recordMessage(session.getSessionId(), "ASSISTANT", naturalReply);
+                    response = buildBaseResponse(session, naturalReply, "You can ask any farming question or select 'Prepare implementation plan' when ready.", false, role);
+                    break;
+                }
+
                 String crop = detectCrop(msg, request.getSelectedCrop());
                 session.setSelectedCrop(crop);
                 session.setCurrentStep("FIELD_AND_METHOD");
@@ -524,6 +532,8 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     }
 
     private FarmingChatResponse buildBaseResponse(ChatbotSession session, String replyText, String promptQuestion, boolean reqConfirmation, String role, com.aquaflow.backend.dto.response.ContextualFormDto contextualForm) {
+        String step = session.getCurrentStep();
+        String lifecycle = "CROP_SELECTION".equals(step) ? "PENDING" : "IN_PROGRESS";
         return FarmingChatResponse.builder()
                 .sessionId(session.getSessionId())
                 .currentStep(session.getCurrentStep())
@@ -540,6 +550,8 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .canManageUsers("ROLE_ADMIN".equals(role))
                 .canViewAuditLogs("ROLE_ADMIN".equals(role))
                 .authorizedCapabilities(getCapabilitiesForRole(role))
+                .taskLifecycleStatus(lifecycle)
+                .workflowSteps(buildCanonicalWorkflowSteps(step, null))
                 .build();
     }
 
@@ -552,6 +564,9 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                         .description(t.getDescription())
                         .status(t.getStatus())
                         .blockingReason(t.getBlockingReason())
+                        .priority(t.getPriority())
+                        .deadline(t.getDeadline() != null ? t.getDeadline().toString() : null)
+                        .evidenceSource(t.getEvidenceSource())
                         .requiresConfirmation(t.getRequiresConfirmation())
                         .build())
                 .collect(Collectors.toList());
@@ -561,9 +576,12 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
             warnings.add("CRITICAL: Emergency Stop is currently active. All pump actions are physically interlocked.");
         }
 
+        String step = session != null ? session.getCurrentStep() : "CONFIRMATION_PENDING";
+        String lifecycle = resolveTaskLifecycleStatus(step, plan);
+
         return FarmingChatResponse.builder()
                 .sessionId(session != null ? session.getSessionId() : plan.getSessionId())
-                .currentStep(session != null ? session.getCurrentStep() : "CONFIRMATION_PENDING")
+                .currentStep(step)
                 .replyText(replyText)
                 .planId(plan.getId())
                 .planCode(plan.getPlanCode())
@@ -574,14 +592,159 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .tasks(taskDtos)
                 .agronomicReferences(getAgronomicReferences(plan.getCropName()))
                 .warnings(warnings)
-                .suggestedQuestions(generateDynamicSuggestedQuestions(session != null ? session.getCurrentStep() : "CONFIRMATION_PENDING"))
+                .suggestedQuestions(generateDynamicSuggestedQuestions(step))
                 .disclaimer("Advisory only. Zero direct actuation capability.")
                 .userRole(role)
                 .canControlIrrigation("ROLE_ADMIN".equals(role) || "ROLE_OPERATOR".equals(role))
                 .canManageUsers("ROLE_ADMIN".equals(role))
                 .canViewAuditLogs("ROLE_ADMIN".equals(role))
                 .authorizedCapabilities(getCapabilitiesForRole(role))
+                .taskLifecycleStatus(lifecycle)
+                .workflowSteps(buildCanonicalWorkflowSteps(step, plan))
                 .build();
+    }
+
+    private String resolveTaskLifecycleStatus(String step, PlantingPlan plan) {
+        if ("CONFIRMATION_PENDING".equals(step)) {
+            return "AWAITING_USER_DECISION";
+        } else if ("PREPARATION_ACTIVE".equals(step)) {
+            if ("BLOCKED_EMERGENCY_STOP".equals(plan.getIrrigationSafetyStatus())) {
+                return "BLOCKED";
+            }
+            boolean allDone = plan.getTasks().stream().allMatch(t -> "COMPLETED".equalsIgnoreCase(t.getStatus()));
+            return allDone ? "SUCCESSFULLY_IMPLEMENTED" : "IN_PROGRESS";
+        } else if ("COMPLETED".equals(step)) {
+            return "SUCCESSFULLY_IMPLEMENTED";
+        }
+        return "IN_PROGRESS";
+    }
+
+    private List<FarmingChatResponse.WorkflowStepDto> buildCanonicalWorkflowSteps(String currentStep, PlantingPlan plan) {
+        List<FarmingChatResponse.WorkflowStepDto> steps = new ArrayList<>();
+        // S01 Capture Prompt
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S01").name("Capture Prompt")
+                .status("COMPLETED")
+                .dependsOn(Collections.emptyList())
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S02 Retrieve Task History
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S02").name("Retrieve Task History")
+                .status("COMPLETED")
+                .dependsOn(List.of("S01"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S03 Classify Intent and Scope
+        boolean s03Done = !"CROP_SELECTION".equals(currentStep);
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S03").name("Classify Intent and Scope")
+                .status(s03Done ? "COMPLETED" : "IN_PROGRESS")
+                .dependsOn(List.of("S01", "S02"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S04 Resolve Prior Task or User Decision
+        boolean isAwaitingDecision = "CONFIRMATION_PENDING".equals(currentStep);
+        String s04Status;
+        if (!s03Done) {
+            s04Status = "WAITING";
+        } else if (isAwaitingDecision) {
+            s04Status = "IN_PROGRESS";
+        } else if ("PREPARATION_ACTIVE".equals(currentStep) || "COMPLETED".equals(currentStep)) {
+            s04Status = "COMPLETED";
+        } else {
+            s04Status = "ELIGIBLE";
+        }
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S04").name("Resolve Prior Task or User Decision")
+                .status(s04Status)
+                .dependsOn(List.of("S03"))
+                .requiresUserDecision(isAwaitingDecision)
+                .isRemediation(false)
+                .build());
+
+        // S05 Define Requirements and Acceptance Criteria
+        boolean s05Done = "PREPARATION_ACTIVE".equals(currentStep) || "COMPLETED".equals(currentStep);
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S05").name("Define Requirements and Acceptance Criteria")
+                .status(s05Done ? "COMPLETED" : (isAwaitingDecision ? "WAITING" : "PENDING"))
+                .dependsOn(List.of("S03", "S04"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S06 Plan Implementation
+        boolean s06Done = plan != null;
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S06").name("Plan Implementation")
+                .status(s06Done ? "COMPLETED" : "PENDING")
+                .dependsOn(List.of("S05"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S07 Verify Prerequisites and Access
+        boolean s07Blocked = plan != null && "BLOCKED_EMERGENCY_STOP".equals(plan.getIrrigationSafetyStatus());
+        String s07Status = s07Blocked ? "BLOCKED" : (s05Done ? "COMPLETED" : "PENDING");
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S07").name("Verify Prerequisites and Access")
+                .status(s07Status)
+                .blockingReason(s07Blocked ? "Physical Emergency Stop active" : null)
+                .dependsOn(List.of("S06"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S08 Implement Changes
+        String s08Status = s07Blocked ? "BLOCKED" : (s05Done ? "IN_PROGRESS" : "PENDING");
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S08").name("Implement Changes")
+                .status(s08Status)
+                .dependsOn(List.of("S07"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S09 Run Tests and Validation
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S09").name("Run Tests and Validation")
+                .status(s05Done && !s07Blocked ? "ELIGIBLE" : "PENDING")
+                .dependsOn(List.of("S08"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S10 Diagnose and Resolve Failures (Conditional remediation)
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S10").name("Diagnose and Resolve Failures")
+                .status("PENDING")
+                .dependsOn(List.of("S09"))
+                .requiresUserDecision(false).isRemediation(true)
+                .build());
+
+        // S11 Review Requirement Completeness
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S11").name("Review Requirement Completeness")
+                .status("PENDING")
+                .dependsOn(List.of("S09"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S12 Persist Final Outcome
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S12").name("Persist Final Outcome")
+                .status("PENDING")
+                .dependsOn(List.of("S11"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        // S13 Report Results
+        steps.add(FarmingChatResponse.WorkflowStepDto.builder()
+                .stepCode("S13").name("Report Results")
+                .status("PENDING")
+                .dependsOn(List.of("S12"))
+                .requiresUserDecision(false).isRemediation(false)
+                .build());
+
+        return steps;
     }
 
     private List<String> generateDynamicSuggestedQuestions(String currentStep) {
@@ -1081,6 +1244,23 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     private boolean isAffirmative(String msg) {
         String lower = msg.toLowerCase().trim();
         return lower.startsWith("yes") || lower.startsWith("y") || lower.contains("proceed") || lower.contains("confirm") || lower.contains("go ahead");
+    }
+
+    private boolean isExplicitPlanningRequest(String msg, String selectedCrop) {
+        if (selectedCrop != null && !selectedCrop.isBlank()) return true;
+        String lower = msg.toLowerCase().trim();
+        return lower.contains("prepare plan") || lower.contains("create plan") ||
+                lower.contains("start planning") || lower.contains("let's plan") ||
+                lower.contains("plan for") || lower.contains("select ") ||
+                lower.startsWith("plan ") || lower.contains("lowland rice") ||
+                lower.contains("transplanting") || lower.contains("direct seed") ||
+                lower.contains("begin assessment") || lower.contains("rc 222") ||
+                lower.contains("rc 160") || lower.contains("rc 82") || lower.contains("rc 216");
+    }
+
+    private String getNaturalConversationalReply(String msg) {
+        return "I am Arva, your agronomic AI advisor for Philippine rice farming. We can discuss your field soil conditions, water management under Alternate Wetting and Drying (AWD), PhilRice PalayCheck guidelines, or weather impacts.\n\n" +
+                "Whenever you would like to formulate a concrete cultivation plan with automated task tracking, simply let me know or click 'Prepare implementation plan'. How can I help you today?";
     }
 
     private List<String> getAgronomicReferences(String crop) {
