@@ -45,6 +45,12 @@ public class NodeLatestTelemetryResponse {
     /** Latest derived water depth in cm; {@code null} when never reported. */
     private Double waterLevelCm;
 
+    /** Latest reported ambient temperature in °C; {@code null} when never reported. */
+    private Double temperatureCelsius;
+
+    /** Latest reported ambient relative humidity percentage; {@code null} when never reported. */
+    private Double humidityPercent;
+
     private Double batteryVoltage;
     private Integer batteryPercent;
 

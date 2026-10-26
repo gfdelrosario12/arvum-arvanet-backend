@@ -20,24 +20,40 @@ CREATE INDEX IF NOT EXISTS idx_dev_mqtt_device ON device_mqtt_credentials(device
 -- 2. Seed Default MQTT Credentials for 6 Field Nodes and ArvaGate Controller
 -- (Passwords are salted PBKDF2/SHA-256 equivalent or securely hashed)
 INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
-VALUES
-    ('ARVANODE-001', 'node_arvanode_001', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-001', 'ACTIVE'),
-    ('ARVANODE-002', 'node_arvanode_002', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-002', 'ACTIVE'),
-    ('ARVANODE-003', 'node_arvanode_003', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-003', 'ACTIVE'),
-    ('ARVANODE-004', 'node_arvanode_004', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-004', 'ACTIVE'),
-    ('ARVANODE-005', 'node_arvanode_005', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-005', 'ACTIVE'),
-    ('ARVANODE-006', 'node_arvanode_006', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-006', 'ACTIVE'),
-    ('ARVAGATE-CTRL-01', 'gate_arvagate_01', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVAGATE-CTRL-01', 'ACTIVE')
-ON CONFLICT (device_id) DO NOTHING;
+SELECT 'ARVANODE-001', 'node_arvanode_001', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-001', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-001');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVANODE-002', 'node_arvanode_002', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-002', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-002');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVANODE-003', 'node_arvanode_003', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-003', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-003');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVANODE-004', 'node_arvanode_004', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-004', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-004');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVANODE-005', 'node_arvanode_005', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-005', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-005');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVANODE-006', 'node_arvanode_006', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVANODE-006', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVANODE-006');
+
+INSERT INTO device_mqtt_credentials (device_id, username, password_hash, client_id, status)
+SELECT 'ARVAGATE-CTRL-01', 'gate_arvagate_01', '$2a$10$wT5fE.dE.pG7vG7v9mKqae9FzI.o9Z4nK7h5hQJqJ2bKkF1M6G9w2', 'ARVAGATE-CTRL-01', 'ACTIVE'
+WHERE NOT EXISTS (SELECT 1 FROM device_mqtt_credentials WHERE device_id = 'ARVAGATE-CTRL-01');
 
 -- 3. Enhance telemetry_stream_events with Message ID and Deduplication Index
 ALTER TABLE telemetry_stream_events ADD COLUMN IF NOT EXISTS message_id VARCHAR(64);
 ALTER TABLE telemetry_stream_events ADD COLUMN IF NOT EXISTS schema_version INT DEFAULT 1;
 ALTER TABLE telemetry_stream_events ADD COLUMN IF NOT EXISTS ingestion_source VARCHAR(32) DEFAULT 'MQTT';
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_telemetry_stream_node_msg
-    ON telemetry_stream_events(node_id, message_id)
-    WHERE message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_telemetry_stream_node_msg
+    ON telemetry_stream_events(node_id, message_id);
 
 -- 4. Transactional Outbox for Event-Driven Notifications & AI Analysis Dispatch
 CREATE TABLE IF NOT EXISTS telemetry_event_outbox (
@@ -87,7 +103,7 @@ ALTER TABLE edge_nodes ADD COLUMN IF NOT EXISTS disconnect_reason VARCHAR(255);
 -- Update edge_nodes defaults
 UPDATE edge_nodes
 SET connection_state = CASE
-    WHEN last_heartbeat IS NOT NULL AND last_heartbeat > CURRENT_TIMESTAMP - INTERVAL '15 minute' THEN 'ONLINE'
+    WHEN last_heartbeat IS NOT NULL AND last_heartbeat > CURRENT_TIMESTAMP - INTERVAL '15' MINUTE THEN 'ONLINE'
     WHEN last_heartbeat IS NOT NULL THEN 'STALE'
     ELSE 'NEVER_CONNECTED'
 END

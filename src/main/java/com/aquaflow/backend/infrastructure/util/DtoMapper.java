@@ -501,6 +501,8 @@ public class DtoMapper {
 
         Double soilMoisturePercent = null;
         Double waterLevelDistanceCm = null;
+        Double temperatureCelsius = null;
+        Double humidityPercent = null;
         Double batteryVoltage = null;
         LocalDateTime lastTelemetryAt = null;
         LocalDateTime lastReceivedAt = null;
@@ -513,6 +515,12 @@ public class DtoMapper {
                 } else if (r.getSensorType() == com.aquaflow.backend.entity.SensorType.WATER_LEVEL_DISTANCE
                         && waterLevelDistanceCm == null) {
                     waterLevelDistanceCm = Math.round(r.getValueNum() * 100.0) / 100.0;
+                } else if (r.getSensorType() == com.aquaflow.backend.entity.SensorType.TEMPERATURE
+                        && temperatureCelsius == null) {
+                    temperatureCelsius = Math.round(r.getValueNum() * 10.0) / 10.0;
+                } else if (r.getSensorType() == com.aquaflow.backend.entity.SensorType.HUMIDITY
+                        && humidityPercent == null) {
+                    humidityPercent = Math.round(r.getValueNum() * 10.0) / 10.0;
                 } else if (r.getSensorType() == com.aquaflow.backend.entity.SensorType.BATTERY_VOLTAGE
                         && batteryVoltage == null) {
                     batteryVoltage = r.getValueNum();
@@ -553,6 +561,8 @@ public class DtoMapper {
                 .soilMoisturePercent(soilMoisturePercent)
                 .waterLevelDistanceCm(waterLevelDistanceCm)
                 .waterLevelCm(waterLevelCm)
+                .temperatureCelsius(temperatureCelsius)
+                .humidityPercent(humidityPercent)
                 .batteryVoltage(batteryVoltage)
                 .batteryPercent(batteryLevel != null ? (int) Math.round(batteryLevel) : null)
                 .soilSensorHealth(soilHealth)

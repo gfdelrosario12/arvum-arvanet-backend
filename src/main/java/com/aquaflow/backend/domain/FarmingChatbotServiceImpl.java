@@ -502,6 +502,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .requiresConfirmation(reqConfirmation)
                 .tasks(Collections.emptyList())
                 .agronomicReferences(getAgronomicReferences(session.getSelectedCrop()))
+                .suggestedQuestions(generateDynamicSuggestedQuestions(session.getCurrentStep()))
                 .disclaimer("Advisory only. Physical actions require explicit confirmation.")
                 .userRole(role)
                 .canControlIrrigation("ROLE_ADMIN".equals(role) || "ROLE_OPERATOR".equals(role))
@@ -542,6 +543,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .tasks(taskDtos)
                 .agronomicReferences(getAgronomicReferences(plan.getCropName()))
                 .warnings(warnings)
+                .suggestedQuestions(generateDynamicSuggestedQuestions(session != null ? session.getCurrentStep() : "CONFIRMATION_PENDING"))
                 .disclaimer("Advisory only. Zero direct actuation capability.")
                 .userRole(role)
                 .canControlIrrigation("ROLE_ADMIN".equals(role) || "ROLE_OPERATOR".equals(role))
@@ -549,6 +551,40 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .canViewAuditLogs("ROLE_ADMIN".equals(role))
                 .authorizedCapabilities(getCapabilitiesForRole(role))
                 .build();
+    }
+
+    private List<String> generateDynamicSuggestedQuestions(String currentStep) {
+        List<String> questions = new ArrayList<>();
+        boolean isEStop = emergencyStopService.isEmergencyStopActive();
+
+        if (isEStop) {
+            questions.add("What should I check before attempting irrigation again?");
+            questions.add("How does the emergency stop affect automated AWD scheduling?");
+        }
+
+        if ("CROP_SELECTION".equalsIgnoreCase(currentStep)) {
+            questions.add("Is the current water depth appropriate for this crop's growth stage?");
+            questions.add("Should I run irrigation now or wait for the AWD reflood window?");
+            questions.add("Should I adjust my irrigation plan based on the PAGASA rain forecast?");
+            questions.add("What PhilRice fertilizer guidelines apply to this rice stage?");
+        } else if ("FIELD_AND_METHOD".equalsIgnoreCase(currentStep)) {
+            questions.add("What seed density is recommended for Wet Bed Transplanting?");
+            questions.add("How does Direct Seeding affect initial water ponding requirements?");
+            questions.add("How does the elevation delta between terraces explain the water variance?");
+            questions.add("What PhilRice land preparation schedule should be followed?");
+        } else if ("CONFIRMATION_PENDING".equalsIgnoreCase(currentStep)) {
+            questions.add("Yes, proceed with preparation");
+            questions.add("What if it rains during the pre-soak soaking window?");
+            questions.add("Why are the monitoring nodes reporting different conditions?");
+            questions.add("No, keep on hold");
+        } else {
+            questions.add("Is the current water depth appropriate for this crop's growth stage?");
+            questions.add("Do the current soil conditions indicate that irrigation may be needed?");
+            questions.add("Should I take action to manage the current water level?");
+            questions.add("What should I monitor next to maintain crop health?");
+        }
+
+        return questions.stream().distinct().limit(5).collect(Collectors.toList());
     }
 
     private List<String> getCapabilitiesForRole(String role) {
