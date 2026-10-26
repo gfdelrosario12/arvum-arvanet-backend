@@ -609,6 +609,17 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
     private String checkTopicalQuery(String msg) {
         String lower = msg.toLowerCase();
+        // Non-Rice crop intercept in Backend
+        if ((lower.contains("corn") || lower.contains("maize") || lower.contains("mais") ||
+                lower.contains("eggplant") || lower.contains("talong") || lower.contains("tomato") ||
+                lower.contains("kamatis") || lower.contains("onion") || lower.contains("sibuyas") ||
+                lower.contains("cabbage") || lower.contains("sugarcane") || lower.contains("banana") ||
+                lower.contains("vegetable") || lower.contains("gulay")) &&
+                !(lower.contains("rice") || lower.contains("palay") || lower.contains("nsic") || lower.contains("tubigan"))) {
+            return "Arva AI is currently designed specifically for Philippine rice cultivation under the PhilRice PalayCheck System and IRRI Alternate Wetting and Drying (AWD) protocol.\n\n" +
+                    "I do not provide full cultivation workflows for other crops at this time. Recommended Philippine rice varieties include Lowland Rice (NSIC Rc 222, NSIC Rc 160, PSB Rc 82, and NSIC Rc 216).\n\n" +
+                    "Would you like to plan a rice crop instead?";
+        }
         if (lower.contains("what should i plant") || lower.contains("what to plant") || lower.contains("recommend crop") || lower.contains("ano ang itatanim")) {
             return "🌾 Recommendation: Lowland Rice (NSIC Rc 222 - Tubigan 21)\n\n" +
                     "• Suitability: Highly recommended for Lopez, Quezon lowland irrigated and rainfed fields (Calumpang clay soil series).\n" +
@@ -675,18 +686,14 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     private String detectCrop(String msg, String selectedCrop) {
         if (selectedCrop != null && !selectedCrop.isBlank()) return selectedCrop;
         String lower = msg.toLowerCase();
-        if (lower.contains("rice") || lower.contains("palay") || lower.contains("nsic")) {
-            return "Lowland Rice (NSIC Rc 222)";
-        } else if (lower.contains("corn") || lower.contains("maize")) {
-            return "Hybrid Yellow Corn";
-        } else if (lower.contains("eggplant") || lower.contains("talong")) {
-            return "Eggplant (Dumaguete Long Purple)";
-        } else if (lower.contains("tomato") || lower.contains("kamatis")) {
-            return "Tomato (Diamante Max)";
-        } else if (lower.contains("onion") || lower.contains("sibuyas")) {
-            return "Red Onion";
+        if (lower.contains("160")) {
+            return "Lowland Rice (NSIC Rc 160)";
+        } else if (lower.contains("82")) {
+            return "Lowland Rice (PSB Rc 82)";
+        } else if (lower.contains("216")) {
+            return "Lowland Rice (NSIC Rc 216)";
         }
-        return msg;
+        return "Lowland Rice (NSIC Rc 222)";
     }
 
     private String extractMethod(String msg) {
