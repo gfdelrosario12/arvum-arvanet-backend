@@ -51,6 +51,12 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
             return buildAdversarialResponse(request.getSessionId(), role);
         }
 
+        // 1B. Destructive Operations Safety Intercept
+        if (isDestructiveOperation(msg)) {
+            recordAuditLog("AI_CHAT_DESTRUCTIVE_INTERCEPT", username, "CHAT", request.getSessionId() != null ? request.getSessionId() : "NONE", Map.of("query", msg, "role", role));
+            return buildDestructiveInterceptResponse(request.getSessionId(), role);
+        }
+
         // 2. Fetch or create session linked to the real authenticated user
         ChatbotSession session;
         if (request.getSessionId() != null && !request.getSessionId().isBlank()) {
@@ -79,6 +85,14 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
         switch (currentStep) {
             case "CROP_SELECTION" -> {
+                // If user asks about weather, fertilizer, water, pests, or what to plant during crop selection
+                String topicReply = checkTopicalQuery(msg);
+                if (topicReply != null) {
+                    recordMessage(session.getSessionId(), "ASSISTANT", topicReply);
+                    response = buildBaseResponse(session, topicReply, "Select Lowland Rice to begin field preparation assessment.", false, role);
+                    break;
+                }
+
                 String crop = detectCrop(msg, request.getSelectedCrop());
                 session.setSelectedCrop(crop);
                 session.setCurrentStep("FIELD_AND_METHOD");
@@ -567,6 +581,78 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 lower.contains("i am the admin") || lower.contains("grant me admin");
     }
 
+    private boolean isDestructiveOperation(String text) {
+        String lower = text.toLowerCase();
+        return (lower.contains("delete") || lower.contains("erase") || lower.contains("purge") || lower.contains("drop table") || lower.contains("wipe")) ||
+                ((lower.contains("unpair") || lower.contains("remove") || lower.contains("reset")) &&
+                        (lower.contains("node") || lower.contains("device") || lower.contains("sensor") || lower.contains("field") || lower.contains("farm")));
+    }
+
+    private FarmingChatResponse buildDestructiveInterceptResponse(String sessionId, String role) {
+        return FarmingChatResponse.builder()
+                .sessionId(sessionId)
+                .currentStep("CROP_SELECTION")
+                .replyText("⚠️ Destructive Operation Intercepted:\nRequests to delete farm records, unpair monitoring nodes, or erase telemetry cannot be executed through chat. Consequential actions require explicit backend authorization (ROLE_ADMIN or ROLE_OPERATOR), confirmation of exact target scope, and audit trail preservation. Use the dedicated Settings or Nodes interface if authorized.")
+                .promptQuestion("How else may I advise on your farm cultivation or rice field management?")
+                .requiresConfirmation(false)
+                .tasks(Collections.emptyList())
+                .agronomicReferences(List.of("ArvaCore Deterministic Safety Interlocks", "ArvaNet Access Control Policy"))
+                .warnings(List.of("Destructive operational request intercepted and refused in chat."))
+                .disclaimer("Advisory only. Maintenance actions require authorized administrative tools.")
+                .userRole(role)
+                .canControlIrrigation("ROLE_ADMIN".equals(role) || "ROLE_OPERATOR".equals(role))
+                .canManageUsers("ROLE_ADMIN".equals(role))
+                .canViewAuditLogs("ROLE_ADMIN".equals(role))
+                .authorizedCapabilities(getCapabilitiesForRole(role))
+                .build();
+    }
+
+    private String checkTopicalQuery(String msg) {
+        String lower = msg.toLowerCase();
+        if (lower.contains("what should i plant") || lower.contains("what to plant") || lower.contains("recommend crop") || lower.contains("ano ang itatanim")) {
+            return "🌾 Recommendation: Lowland Rice (NSIC Rc 222 - Tubigan 21)\n\n" +
+                    "• Suitability: Highly recommended for Lopez, Quezon lowland irrigated and rainfed fields (Calumpang clay soil series).\n" +
+                    "• Climate & Water: Excellent adaptability to wet and dry seasons with high tillering capacity (maturity: 106 days, potential yield: 10.0 tons/ha).\n" +
+                    "• Water Management: Optimized for Alternate Wetting and Drying (AWD) water-saving technology.\n\n" +
+                    "Would you like to select Lowland Rice and proceed with field assessment?";
+        }
+        if (lower.contains("rain") || lower.contains("weather") || lower.contains("typhoon") || lower.contains("forecast")) {
+            return "🌦️ PAGASA Agro-Meteorological & Weather Impact Advisory:\n" +
+                    "• Heavy rainfall (>30 mm/24h) suspends pump irrigation automatically to prevent waterlogging and fertilizer leaching.\n" +
+                    "• Plowing/Harrowing: Maintain drainage gates at 2-3 cm overflow height to prevent drowned field bunds.\n" +
+                    "• High Winds: Lower standing water to 1-2 cm to minimize lodging risk in tall or flowering rice.\n" +
+                    "• Lopez, Quezon experiences Type IV climate (rainfall distributed year-round).";
+        }
+        if (lower.contains("fertilizer") || lower.contains("nutrient") || lower.contains("urea") || lower.contains("nitrogen") || lower.contains("zinc")) {
+            return "🌱 PhilRice Integrated Nutrient Management (INM) Advisory:\n" +
+                    "• Diagnostic Tools: Use Leaf Color Chart (LCC threshold = 4) to determine exact nitrogen topdressing timing.\n" +
+                    "• Nitrogen Split: 1/3 basal at final harrowing, 1/3 at mid-tillering, 1/3 at panicle initiation.\n" +
+                    "• Phosphorus (P): 100% basal incorporation during final harrowing.\n" +
+                    "• Potassium (K): 50% basal at harrowing, 50% at early panicle initiation (EPI).\n" +
+                    "• Zinc: Apply 10-25 kg/ha Zinc Sulfate within 10-14 days after transplanting.";
+        }
+        if (lower.contains("water") || lower.contains("irrigation") || lower.contains("awd") || lower.contains("depth")) {
+            return "💧 Growth-Stage Irrigation & Alternate Wetting and Drying (AWD) Advisory:\n" +
+                    "• Vegetative Stage: Maintain 2-3 cm shallow water. Safe drying down to -15 cm (AWD) promotes deep root anchorage.\n" +
+                    "• Panicle Initiation to Flowering: CRITICAL! Keep continuously flooded at 3-5 cm depth. Moisture stress causes spikelet sterility.\n" +
+                    "• Terminal Drainage: Completely drain 7-10 days before harvest to harden the paddy soil.";
+        }
+        if (lower.contains("pest") || lower.contains("snail") || lower.contains("kuhol") || lower.contains("weed") || lower.contains("disease")) {
+            return "🛡️ PhilRice Integrated Pest Management (IPM) & Crop Protection Advisory:\n" +
+                    "• Golden Apple Snail (Kuhol): Maintain 1-2 cm shallow water during first 2 weeks after transplanting; install wire screens at inlets.\n" +
+                    "• Weed Control: Maintain 2-3 cm water blanket 3-4 days after transplanting to suppress weed seeds; rotary weed at 15-20 DAT.\n" +
+                    "• Stem Borer & Blast: Avoid excess nitrogen (>120 kg N/ha); balance with potassium and field sanitation.";
+        }
+        if (lower.contains("land prep") || lower.contains("prepare the field") || lower.contains("plow") || lower.contains("harrow")) {
+            return "🚜 PhilRice 21-Day Thorough Land Preparation Protocol:\n" +
+                    "• Days 1-7: Plowing at 10-15 cm depth immediately after soaking to bury weeds and stubble.\n" +
+                    "• Days 7-14: Harrowing twice at 7-day intervals to break clods, puddle soil, and germinate weed seeds.\n" +
+                    "• Days 14-21: Leveling with wooden plank. Well-leveled fields reduce water use by 30% and suppress weed growth.\n" +
+                    "• Lopez, Quezon Calumpang clay soil requires 3-5 days soaking prior to primary tillage.";
+        }
+        return null;
+    }
+
     private FarmingChatResponse buildAdversarialResponse(String sessionId, String role) {
         return FarmingChatResponse.builder()
                 .sessionId(sessionId)
@@ -623,9 +709,13 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
     private List<String> getAgronomicReferences(String crop) {
         List<String> refs = new ArrayList<>();
+        refs.add("PhilRice Philippine Rice Production Training Manual (2003) - Modules 4, 5, 6, 7, 8, 19");
         refs.add("IRRI Technical Bulletin: Alternate Wetting and Drying (AWD) for Rice (2020)");
         refs.add("DA-PhilRice NSIC Rc 222 Variety Production Guide (2023)");
+        refs.add("PAGASA 3-Day & Seasonal Agro-Meteorological Weather Forecast");
+        refs.add("Lopez, Quezon Municipal Agricultural Profile (Calumpang Clay Soil Series)");
         refs.add("Bureau of Soils and Water Management (BSWM) Crop Water Requirements");
+        refs.add("ArvaNode Field Telemetry: Rootzone Soil Moisture & Field Water Tube Ultrasonic Level");
         return refs;
     }
 

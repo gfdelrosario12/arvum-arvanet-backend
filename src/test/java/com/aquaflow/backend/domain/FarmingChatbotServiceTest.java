@@ -181,4 +181,47 @@ class FarmingChatbotServiceTest {
 
         assertThrows(AccessDeniedException.class, () -> chatbotService.processMessage(req, farmerAuth));
     }
+
+    @Test
+    void testTopicalQueryInterceptDuringCropSelection() {
+        ChatbotSession session = ChatbotSession.builder()
+                .sessionId("sess-topic")
+                .userId("MrFarmer")
+                .currentStep("CROP_SELECTION")
+                .build();
+
+        when(sessionRepository.findBySessionId("sess-topic")).thenReturn(Optional.of(session));
+
+        FarmingChatMessageRequest req = FarmingChatMessageRequest.builder()
+                .sessionId("sess-topic")
+                .message("What if it rains tomorrow?")
+                .build();
+
+        FarmingChatResponse resp = chatbotService.processMessage(req, farmerAuth);
+        assertNotNull(resp);
+        assertEquals("CROP_SELECTION", resp.getCurrentStep());
+        assertTrue(resp.getReplyText().contains("PAGASA"));
+        assertTrue(resp.getAgronomicReferences().size() > 0);
+    }
+
+    @Test
+    void testDestructiveIntentInterceptedInChat() {
+        ChatbotSession session = ChatbotSession.builder()
+                .sessionId("sess-destruct")
+                .userId("MrFarmer")
+                .currentStep("CROP_SELECTION")
+                .build();
+
+        when(sessionRepository.findBySessionId("sess-destruct")).thenReturn(Optional.of(session));
+
+        FarmingChatMessageRequest req = FarmingChatMessageRequest.builder()
+                .sessionId("sess-destruct")
+                .message("Delete field 1 and erase node records")
+                .build();
+
+        FarmingChatResponse resp = chatbotService.processMessage(req, farmerAuth);
+        assertNotNull(resp);
+        assertTrue(resp.getReplyText().contains("Destructive Operation Intercepted"));
+        assertTrue(resp.getWarnings().contains("Destructive operational request intercepted and refused in chat."));
+    }
 }
