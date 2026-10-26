@@ -20,9 +20,14 @@ public class PlantingTask {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "plan_id", nullable = false)
+    @JoinColumn(name = "plan_id", nullable = true)
     @JsonIgnore
     private PlantingPlan plantingPlan;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pre_irrigation_plan_id", nullable = true)
+    @JsonIgnore
+    private PreIrrigationPlan preIrrigationPlan;
 
     @Column(name = "category", nullable = false, length = 50)
     private String category; // SYSTEM_AUTOMATED, FARMER_MANUAL, EQUIPMENT_INFO, SAFETY_BLOCKED
@@ -34,10 +39,25 @@ public class PlantingTask {
     private String description;
 
     @Column(name = "status", nullable = false, length = 50)
-    private String status; // PENDING, IN_PROGRESS, COMPLETED, BLOCKED
+    private String status; // PENDING, IN_PROGRESS, COMPLETED, BLOCKED, REJECTED, CANCELLED, ABANDONED, OVERDUE, RESCHEDULED
 
     @Column(name = "blocking_reason", length = 255)
     private String blockingReason;
+
+    @Column(name = "priority", length = 50)
+    private String priority; // LOW, NORMAL, HIGH, CRITICAL_PREREQUISITE
+
+    @Column(name = "evidence_source", length = 255)
+    private String evidenceSource;
+
+    @Column(name = "completion_evidence", columnDefinition = "TEXT")
+    private String completionEvidence;
+
+    @Column(name = "associated_irrigation_command_id", length = 64)
+    private String associatedIrrigationCommandId;
+
+    @Column(name = "deadline")
+    private OffsetDateTime deadline;
 
     @Column(name = "requires_confirmation", nullable = false)
     private Boolean requiresConfirmation;
