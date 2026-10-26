@@ -83,6 +83,20 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
             return resetSession(session.getSessionId(), fieldId, authentication);
         }
 
+        // 3A. Contextual Form Submission Handler
+        if (request.getFormData() != null && !request.getFormData().isEmpty()) {
+            response = handleFormSubmission(session, request.getFormData(), role, fieldId, authentication);
+            return response;
+        }
+
+        // 3B. Contextual Form Request Detector (e.g. When should I plant?, How much water?)
+        com.aquaflow.backend.dto.response.ContextualFormDto contextualForm = detectContextualForm(msg);
+        if (contextualForm != null) {
+            String formPrompt = String.format("I can provide a customized %s recommendation for your rice paddy. Please verify your field details below:", contextualForm.getTitle().toLowerCase());
+            recordMessage(session.getSessionId(), "ASSISTANT", formPrompt);
+            return buildBaseResponse(session, formPrompt, "Please fill in the details above or ask another question.", false, role, contextualForm);
+        }
+
         switch (currentStep) {
             case "CROP_SELECTION" -> {
                 // If user asks about weather, fertilizer, water, pests, or what to plant during crop selection
@@ -494,6 +508,10 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     }
 
     private FarmingChatResponse buildBaseResponse(ChatbotSession session, String replyText, String promptQuestion, boolean reqConfirmation, String role) {
+        return buildBaseResponse(session, replyText, promptQuestion, reqConfirmation, role, null);
+    }
+
+    private FarmingChatResponse buildBaseResponse(ChatbotSession session, String replyText, String promptQuestion, boolean reqConfirmation, String role, com.aquaflow.backend.dto.response.ContextualFormDto contextualForm) {
         return FarmingChatResponse.builder()
                 .sessionId(session.getSessionId())
                 .currentStep(session.getCurrentStep())
@@ -503,6 +521,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .tasks(Collections.emptyList())
                 .agronomicReferences(getAgronomicReferences(session.getSelectedCrop()))
                 .suggestedQuestions(generateDynamicSuggestedQuestions(session.getCurrentStep()))
+                .contextualForm(contextualForm)
                 .disclaimer("Advisory only. Physical actions require explicit confirmation.")
                 .userRole(role)
                 .canControlIrrigation("ROLE_ADMIN".equals(role) || "ROLE_OPERATOR".equals(role))
@@ -717,6 +736,308 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .canViewAuditLogs("ROLE_ADMIN".equals(role))
                 .authorizedCapabilities(getCapabilitiesForRole(role))
                 .build();
+    }
+
+    private FarmingChatResponse handleFormSubmission(ChatbotSession session, Map<String, Object> formData, String role, Long fieldId, Authentication authentication) {
+        String formType = (String) formData.getOrDefault("formType", "GENERIC_FORM");
+        StringBuilder reply = new StringBuilder();
+
+        if ("PLANTING_SCHEDULE".equals(formType)) {
+            String variety = (String) formData.getOrDefault("riceVariety", "Lowland Rice (NSIC Rc 222)");
+            String condition = (String) formData.getOrDefault("currentFieldCondition", "Unplowed stubble");
+            String waterAvail = (String) formData.getOrDefault("waterAvailability", "NIA canal active");
+            String targetDate = (String) formData.getOrDefault("plannedPlantingDate", "Within 21 days");
+
+            session.setSelectedCrop(variety);
+            session.setPlantingMethod("Wet Bed Transplanting");
+            session.setIntendedSchedule(targetDate);
+            sessionRepository.save(session);
+
+            reply.append(String.format("🌾 **Customized Planting Schedule for %s**\n\n", variety))
+                 .append(String.format("• **Current State:** %s\n", condition))
+                 .append(String.format("• **Water Supply:** %s\n", waterAvail))
+                 .append(String.format("• **Target Sowing/Transplanting:** %s\n\n", targetDate))
+                 .append("📋 **PhilRice 21-Day Schedule Recommendation:**\n")
+                 .append("1. **Day 1-5 (Soaking & Plowing):** Deliver 3-5 cm pre-soak water layer to soften Calumpang clay; plow at 10-15 cm depth.\n")
+                 .append("2. **Day 7-10 (First Harrowing):** Harrow twice crosswise to incorporate organic stubble and break clods.\n")
+                 .append("3. **Day 14 (Seedbed Sowing):** Prepare 400 m² seedbed for 20-40 kg certified seed; soak 24h and incubate 24-36h.\n")
+                 .append("4. **Day 20-21 (Final Leveling & Transplanting):** Level field with wooden plank. Transplant 2-3 seedlings/hill at 20x20 cm spacing.\n\n")
+                 .append("Would you like to formalize this into an official ArvaCore planting plan?");
+        } else if ("IRRIGATION_ASSESSMENT".equals(formType)) {
+            String cropStage = (String) formData.getOrDefault("cropStage", "Vegetative / Active Tillering");
+            String targetTerrace = (String) formData.getOrDefault("targetTerrace", "All Terraces");
+            String waterStatus = (String) formData.getOrDefault("waterSourceStatus", "Pump Operational");
+
+            reply.append(String.format("💧 **Irrigation & AWD Assessment (%s)**\n\n", targetTerrace))
+                 .append(String.format("• **Crop Stage:** %s\n", cropStage))
+                 .append(String.format("• **Water Infrastructure:** %s\n\n", waterStatus))
+                 .append("📊 **AWD Water Management Action:**\n");
+
+            if (cropStage.contains("Flowering") || cropStage.contains("Panicle")) {
+                reply.append("⚠️ **CRITICAL MOISTURE WINDOW:** Crop is at reproductive stage. AWD drying is suspended! Maintain standing water continuously at +3.0 to +5.0 cm depth to prevent spikelet sterility.\n")
+                     .append("• Recommended Pump Run: 35-45 minutes to restore +4.0 cm ponding depth.\n");
+            } else if (cropStage.contains("Terminal")) {
+                reply.append("• **Terminal Drainage Phase:** Completely drain all water 7-10 days before harvest to facilitate uniform grain drying and mechanical trafficability.\n");
+            } else {
+                reply.append("• **Vegetative Safe AWD Protocol:** Allow perched water table to naturally decline down to -15.0 cm before reflooding. Maintain 2-3 cm shallow layer when flooded to encourage tiller expansion and deep root growth.\n")
+                     .append("• Recommended Pump Run: 25 minutes per terrace once -15 cm threshold is signaled by ArvaNode.\n");
+            }
+        } else if ("FERTILIZER_INM".equals(formType)) {
+            String stage = (String) formData.getOrDefault("growthStage", "Mid-Tillering");
+            String lcc = (String) formData.getOrDefault("leafColorScore", "Score 3");
+
+            reply.append("🌱 **PhilRice Integrated Nutrient Management (INM) Topdressing Plan**\n\n")
+                 .append(String.format("• **Evaluated Stage:** %s\n", stage))
+                 .append(String.format("• **Leaf Color Reading:** %s\n\n", lcc))
+                 .append("⚖️ **Topdressing Recommendation:**\n");
+
+            if (lcc.contains("Score 4") || lcc.contains("Score 5")) {
+                reply.append("• **Nitrogen Status Optimal:** Leaves indicate sufficient nitrogen absorption (LCC ≥ 4). **Do not apply urea at this time** to avoid excessive vegetative growth and pest vulnerability.\n");
+            } else {
+                reply.append("• **Nitrogen Deficiency Detected:** Apply **1.0 to 1.5 bags/ha of Urea (46-0-0)** or 2.0 bags of Ammonium Sulfate (21-0-0).\n")
+                     .append("• **Water Condition Requirement:** Ensure standing water is at 2-3 cm shallow depth when broadcasting to prevent leaching.\n");
+            }
+        } else if ("PEST_DISEASE".equals(formType)) {
+            String symptom = (String) formData.getOrDefault("observedSymptom", "Snail damage");
+            String part = (String) formData.getOrDefault("affectedPlantPart", "Base of tillers");
+            String severity = (String) formData.getOrDefault("severityLevel", "Localized");
+
+            reply.append("🛡️ **Integrated Pest & Disease Diagnostic (PhilRice IPM)**\n\n")
+                 .append(String.format("• **Obsymptom:** %s\n", symptom))
+                 .append(String.format("• **Part Affected:** %s\n", part))
+                 .append(String.format("• **Severity:** %s\n\n", severity))
+                 .append("🔍 **Immediate Action Protocol:**\n")
+                 .append("1. **Water Regulation:** Lower water level to 1-2 cm shallow sheet to restrict golden apple snail mobility.\n")
+                 .append("2. **Physical Barriers:** Install 1 mm wire mesh screens at field inlet canals.\n")
+                 .append("3. **Biological & Field Care:** Avoid excess nitrogen fertilizers that soften rice leaf sheaths and attract stem borer moths.\n");
+        } else if ("HARVEST_PLAN".equals(formType)) {
+            String yellowing = (String) formData.getOrDefault("grainYellowingPercent", "80-85%");
+            String soil = (String) formData.getOrDefault("soilFirmness", "Firm");
+
+            reply.append("🌾 **Harvest Maturity & Postharvest Assessment**\n\n")
+                 .append(String.format("• **Grain Yellowing:** %s\n", yellowing))
+                 .append(String.format("• **Soil Condition:** %s\n\n", soil))
+                 .append("🎯 **Harvest Readiness Verdict:**\n");
+
+            if (yellowing.contains("80%") || yellowing.contains("85%")) {
+                reply.append("✅ **Optimal Harvest Window Reached:** Grains on upper 80-85% of panicles are golden straw-colored, and grains at base are in hard dough stage. Harvest immediately to minimize shattering loss and maintain high head rice recovery.\n");
+            } else if (yellowing.contains("Below") || yellowing.contains("70%")) {
+                reply.append("⏳ **Immature Grains:** Panicles require an additional 5-8 days before harvest. Harvesting early produces chalky, broken kernels.\n");
+            } else {
+                reply.append("⚠️ **Over-Mature:** Harvest without delay. Re-wetting from rainfall may trigger grain sprouting on the panicle.\n");
+            }
+        } else {
+            reply.append("Thank you for providing the farm details. The parameters have been recorded and incorporated into your Arva AI advisory state.");
+        }
+
+        String replyText = reply.toString();
+        recordMessage(session.getSessionId(), "ASSISTANT", replyText);
+        return buildBaseResponse(session, replyText, "What other questions or adjustments do you have regarding this recommendation?", false, role);
+    }
+
+    private com.aquaflow.backend.dto.response.ContextualFormDto detectContextualForm(String msg) {
+        String lower = msg.toLowerCase();
+        
+        // 1. Planting Schedule / Crop Establishment advice
+        if (lower.contains("when should i plant") || lower.contains("kailan magtatanim") ||
+            lower.contains("schedule my planting") || lower.contains("planting date") ||
+            (lower.contains("when to plant") && lower.contains("rice"))) {
+            return com.aquaflow.backend.dto.response.ContextualFormDto.builder()
+                    .formId("form-planting-" + System.currentTimeMillis())
+                    .formType("PLANTING_SCHEDULE")
+                    .title("Planting Schedule Assessment")
+                    .description("Help Arva calculate your optimal sowing window, seedbed duration, and land preparation timeline.")
+                    .submitButtonLabel("Submit to Arva")
+                    .fields(List.of(
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("field")
+                                    .label("Target Field")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Main Rice Field (Pitak 1-6)")
+                                    .options(List.of("Main Rice Field (Pitak 1-6)", "Terrace Upper (Pitak 1-2)", "Terrace Mid (Pitak 3-4)", "Terrace Lower (Pitak 5-6)"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("riceVariety")
+                                    .label("Rice Variety")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Lowland Rice (NSIC Rc 222)")
+                                    .options(List.of("Lowland Rice (NSIC Rc 222)", "Lowland Rice (NSIC Rc 160)", "Lowland Rice (PSB Rc 82)", "Lowland Rice (NSIC Rc 216)"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("currentFieldCondition")
+                                    .label("Current Field Condition")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Unplowed with crop stubble")
+                                    .options(List.of("Unplowed with crop stubble", "Primary plowed, soaking", "Secondary harrowed", "Puddled & ready for leveling"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("waterAvailability")
+                                    .label("Water Availability")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("NIA Irrigation Canal Active")
+                                    .options(List.of("NIA Irrigation Canal Active", "Deep Well Submersible Pump", "Rainfed / Catchment Only", "Low / Water Scarcity"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("plannedPlantingDate")
+                                    .label("Intended Planting Date (Optional)")
+                                    .type("date")
+                                    .required(false)
+                                    .placeholder("YYYY-MM-DD")
+                                    .build()
+                    ))
+                    .build();
+        }
+
+        // 2. Irrigation / Water Volume / Need advice
+        if (lower.contains("how much water") || lower.contains("when should i irrigate") ||
+            lower.contains("gaano karaming tubig") || lower.contains("kailan magpapatubig") ||
+            (lower.contains("need water") && lower.contains("field"))) {
+            return com.aquaflow.backend.dto.response.ContextualFormDto.builder()
+                    .formId("form-irrigation-" + System.currentTimeMillis())
+                    .formType("IRRIGATION_ASSESSMENT")
+                    .title("Irrigation Demand Assessment")
+                    .description("Provide terrace parameters to let Arva compute AWD reflood depth and pump duration.")
+                    .submitButtonLabel("Calculate Irrigation Window")
+                    .fields(List.of(
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("cropStage")
+                                    .label("Current Crop Growth Stage")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Vegetative / Active Tillering")
+                                    .options(List.of("Land Preparation (Soaking)", "Seedling Nursery (1-14 DAT)", "Vegetative / Active Tillering", "Panicle Initiation to Flowering (CRITICAL)", "Grain Filling / Ripening", "Terminal Drainage"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("targetTerrace")
+                                    .label("Target Terrace / Node")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("All Terraces (ARVANODE-001 to 006)")
+                                    .options(List.of("All Terraces (ARVANODE-001 to 006)", "Pitak 1 - Upper Inflow (ARVANODE-001)", "Pitak 2 - North Lateral (ARVANODE-002)", "Pitak 3 - Center Bench (ARVANODE-003)", "Pitak 4 - Low Center (ARVANODE-004)", "Pitak 5 - Distal Basin (ARVANODE-005)", "Pitak 6 - Tail Drain (ARVANODE-006)"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("waterSourceStatus")
+                                    .label("Water Supply Status")
+                                    .type("select")
+                                    .required(false)
+                                    .defaultValue("Submersible Pump Operational")
+                                    .options(List.of("Submersible Pump Operational", "Canal Gravity Flow Available", "Restricted / Scheduled NIA Water", "Emergency Interlock Active"))
+                                    .build()
+                    ))
+                    .build();
+        }
+
+        // 3. Fertilizer / Nutrient Management advice
+        if (lower.contains("what fertilizer") || lower.contains("anong abono") ||
+            lower.contains("fertilizer guide") || lower.contains("how much urea") ||
+            lower.contains("nutrient recommendation")) {
+            return com.aquaflow.backend.dto.response.ContextualFormDto.builder()
+                    .formId("form-fertilizer-" + System.currentTimeMillis())
+                    .formType("FERTILIZER_INM")
+                    .title("PhilRice INM Fertilizer Diagnosis")
+                    .description("Enter growth and soil observations for exact nitrogen split and topdressing rates.")
+                    .submitButtonLabel("Get Fertilizer Split")
+                    .fields(List.of(
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("growthStage")
+                                    .label("Days After Transplanting (DAT) / Stage")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Mid-Tillering (14-21 DAT)")
+                                    .options(List.of("Basal (Final Harrowing T-0)", "Early Tillering (7-10 DAT)", "Mid-Tillering (14-21 DAT)", "Panicle Initiation (EPI 40-45 DAT)", "Booting to Heading"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("leafColorScore")
+                                    .label("Leaf Color Chart (LCC) Score")
+                                    .type("select")
+                                    .required(false)
+                                    .defaultValue("Score 3 (Light Green - Topdress Needed)")
+                                    .options(List.of("Score 2 (Yellowish Green - Severely Deficient)", "Score 3 (Light Green - Topdress Needed)", "Score 4 (Medium Green - Optimal)", "Score 5 (Dark Green - High Nitrogen, Do Not Topdress)"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("previousApplication")
+                                    .label("Previous Application")
+                                    .type("text")
+                                    .placeholder("e.g. 1 bag Complete 14-14-14 at basal")
+                                    .required(false)
+                                    .build()
+                    ))
+                    .build();
+        }
+
+        // 4. Pest & Disease Concerns
+        if (lower.contains("pest") || lower.contains("kuhol") || lower.contains("snail") ||
+            lower.contains("disease") || lower.contains("uod") || lower.contains("sakit ng palay")) {
+            return com.aquaflow.backend.dto.response.ContextualFormDto.builder()
+                    .formId("form-pest-" + System.currentTimeMillis())
+                    .formType("PEST_DISEASE")
+                    .title("Integrated Pest & Disease Diagnosis")
+                    .description("Specify field damage patterns to identify control measures under PhilRice IPM.")
+                    .submitButtonLabel("Diagnose Pest/Disease")
+                    .fields(List.of(
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("observedSymptom")
+                                    .label("Primary Symptom / Pest Observed")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Cut seedling stems / Golden apple snail eggs")
+                                    .options(List.of("Cut seedling stems / Golden apple snail eggs", "Dead central tillers / Deadhearts (Stem Borer)", "Yellowing/drying leaf tips (Bacterial Leaf Blight)", "Spindle-shaped diamond lesions (Rice Blast)", "Hollow whiteheads during heading"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("affectedPlantPart")
+                                    .label("Affected Plant Part")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Base of tillers / Rootzone")
+                                    .options(List.of("Base of tillers / Rootzone", "Leaf blades and tips", "Stems and nodes", "Panicles and developing grains"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("severityLevel")
+                                    .label("Severity / Affected Area")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Localized patches (<10% field)")
+                                    .options(List.of("Isolated plants (<5%)", "Localized patches (<10% field)", "Moderate spread (10-30% field)", "Widespread / Severe (>30% field)"))
+                                    .build()
+                    ))
+                    .build();
+        }
+
+        // 5. Harvest Planning
+        if (lower.contains("when to harvest") || lower.contains("kailan aani") ||
+            lower.contains("harvest schedule") || lower.contains("ready for harvest")) {
+            return com.aquaflow.backend.dto.response.ContextualFormDto.builder()
+                    .formId("form-harvest-" + System.currentTimeMillis())
+                    .formType("HARVEST_PLAN")
+                    .title("Harvest Readiness Assessment")
+                    .description("Enter grain visual indicators to confirm terminal drainage and threshing schedule.")
+                    .submitButtonLabel("Assess Harvest Timing")
+                    .fields(List.of(
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("grainYellowingPercent")
+                                    .label("Yellow / Golden Grains on Panicle")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("80% to 85% yellow grains")
+                                    .options(List.of("Below 70% (Too early - milky/dough stage)", "70% to 80% (Immature)", "80% to 85% yellow grains (Optimal Harvest Window)", "Over 90% (Risk of shattering and lodging)"))
+                                    .build(),
+                            com.aquaflow.backend.dto.response.ContextualFormFieldDto.builder()
+                                    .id("soilFirmness")
+                                    .label("Paddy Soil Condition")
+                                    .type("select")
+                                    .required(true)
+                                    .defaultValue("Drained for 7-10 days, soil firm")
+                                    .options(List.of("Standing water still present", "Muddy / saturated", "Drained for 7-10 days, soil firm (Ready for mechanical reaper)", "Hard cracked soil"))
+                                    .build()
+                    ))
+                    .build();
+        }
+
+        return null;
     }
 
     private String detectCrop(String msg, String selectedCrop) {

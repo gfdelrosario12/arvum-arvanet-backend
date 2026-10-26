@@ -26,6 +26,7 @@ public class FarmingChatResponse {
     private List<String> warnings;
     private String disclaimer;
     private List<String> suggestedQuestions;
+    private ContextualFormDto contextualForm;
 
     // RBAC Context dynamically communicated to the frontend client
     private String userRole;
