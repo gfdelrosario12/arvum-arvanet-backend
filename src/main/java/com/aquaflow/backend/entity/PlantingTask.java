@@ -44,8 +44,9 @@ public class PlantingTask {
     @Column(name = "blocking_reason", length = 255)
     private String blockingReason;
 
-    @Column(name = "priority", length = 50)
-    private String priority; // LOW, NORMAL, HIGH, CRITICAL_PREREQUISITE
+    @Builder.Default
+    @Column(name = "priority", nullable = false, length = 50)
+    private String priority = "NORMAL"; // LOW, NORMAL, HIGH, CRITICAL_PREREQUISITE
 
     @Column(name = "evidence_source", length = 255)
     private String evidenceSource;
