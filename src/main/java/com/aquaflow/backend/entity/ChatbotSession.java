@@ -24,6 +24,16 @@ public class ChatbotSession {
     @Column(name = "user_id", nullable = false, length = 100)
     private String userId;
 
+    @Column(name = "title", length = 255)
+    private String title;
+
+    @Builder.Default
+    @Column(name = "is_archived", nullable = false)
+    private Boolean isArchived = false;
+
+    @Column(name = "last_activity_at", nullable = false)
+    private OffsetDateTime lastActivityAt;
+
     @Column(name = "field_id")
     private Long fieldId;
 
@@ -48,4 +58,3 @@ public class ChatbotSession {
     @Column(name = "metadata_json", columnDefinition = "TEXT")
     private String metadataJson;
 }
-

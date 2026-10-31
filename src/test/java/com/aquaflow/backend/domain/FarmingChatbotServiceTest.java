@@ -33,6 +33,9 @@ class FarmingChatbotServiceTest {
     private TelemetryReadingRepository telemetryRepository;
     private EmergencyStopService emergencyStopService;
     private IrrigationAuditLogRepository auditLogRepository;
+    private PlanConversationLinkRepository planConversationLinkRepository;
+    private PlanStatusHistoryRepository planStatusHistoryRepository;
+    private PlantingTaskDependencyRepository taskDependencyRepository;
     private ObjectMapper objectMapper;
     private FarmingChatbotServiceImpl chatbotService;
 
@@ -49,6 +52,9 @@ class FarmingChatbotServiceTest {
         telemetryRepository = mock(TelemetryReadingRepository.class);
         emergencyStopService = mock(EmergencyStopService.class);
         auditLogRepository = mock(IrrigationAuditLogRepository.class);
+        planConversationLinkRepository = mock(PlanConversationLinkRepository.class);
+        planStatusHistoryRepository = mock(PlanStatusHistoryRepository.class);
+        taskDependencyRepository = mock(PlantingTaskDependencyRepository.class);
         objectMapper = new ObjectMapper();
 
         chatbotService = new FarmingChatbotServiceImpl(
@@ -59,6 +65,9 @@ class FarmingChatbotServiceTest {
                 telemetryRepository,
                 emergencyStopService,
                 auditLogRepository,
+                planConversationLinkRepository,
+                planStatusHistoryRepository,
+                taskDependencyRepository,
                 objectMapper
         );
 

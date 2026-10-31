@@ -1,7 +1,11 @@
 package com.aquaflow.backend.domain;
 
 import com.aquaflow.backend.dto.request.FarmingChatMessageRequest;
+import com.aquaflow.backend.dto.request.PlanStatusUpdateRequest;
+import com.aquaflow.backend.dto.request.TaskDependencyRequest;
+import com.aquaflow.backend.dto.response.ChatSessionSummaryDto;
 import com.aquaflow.backend.dto.response.FarmingChatResponse;
+import com.aquaflow.backend.dto.response.PlanDetailDto;
 import com.aquaflow.backend.entity.*;
 import com.aquaflow.backend.infrastructure.exception.ResourceNotFoundException;
 import com.aquaflow.backend.infrastructure.exception.ValidationException;
@@ -32,6 +36,9 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     private final TelemetryReadingRepository telemetryRepository;
     private final EmergencyStopService emergencyStopService;
     private final IrrigationAuditLogRepository auditLogRepository;
+    private final PlanConversationLinkRepository planConversationLinkRepository;
+    private final PlanStatusHistoryRepository planStatusHistoryRepository;
+    private final PlantingTaskDependencyRepository taskDependencyRepository;
     private final ObjectMapper objectMapper;
 
     public static final String INITIAL_QUESTION = "Hi, I am Arva, what do you like to plant today?";
@@ -74,6 +81,13 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
         // Record incoming user message
         recordMessage(session.getSessionId(), "USER", msg);
+        session.setLastActivityAt(OffsetDateTime.now());
+        session.setUpdatedAt(OffsetDateTime.now());
+        if ("New Agricultural Consultation".equals(session.getTitle()) && !msg.isBlank()) {
+            String cleanTitle = msg.replaceAll("[\\r\\n]+", " ").trim();
+            session.setTitle(cleanTitle.length() > 60 ? cleanTitle.substring(0, 57) + "..." : cleanTitle);
+        }
+        sessionRepository.save(session);
 
         // 3. Conversational State Machine
         FarmingChatResponse response;
@@ -138,6 +152,28 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 // Build Grounded Planting Plan with Deterministic Tasks
                 PlantingPlan plan = generatePlantingPlan(session, fieldId);
                 planRepository.save(plan);
+
+                // Record link between plan and conversation
+                if (!planConversationLinkRepository.existsByPlanIdAndSessionId(plan.getId(), session.getSessionId())) {
+                    PlanConversationLink link = PlanConversationLink.builder()
+                            .planId(plan.getId())
+                            .sessionId(session.getSessionId())
+                            .linkType("CREATED")
+                            .linkedAt(OffsetDateTime.now())
+                            .build();
+                    planConversationLinkRepository.save(link);
+                }
+
+                // Initial status history
+                PlanStatusHistory history = PlanStatusHistory.builder()
+                        .planId(plan.getId())
+                        .fromStatus(null)
+                        .toStatus("NOT_STARTED")
+                        .changedBy(username)
+                        .reason("Initial agricultural consultation and plan proposal generated")
+                        .createdAt(OffsetDateTime.now())
+                        .build();
+                planStatusHistoryRepository.save(history);
 
                 session.setCurrentStep("CONFIRMATION_PENDING");
                 sessionRepository.save(session);
@@ -290,9 +326,11 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
             throw new ValidationException("IRRIGATION_SAFETY_VIOLATION: Cannot execute automated preparation while emergency stop is active.");
         }
 
+        String oldStatus = plan.getLifecycleStatus();
         plan.setFarmerConfirmed(true);
         plan.setFarmerConfirmedAt(OffsetDateTime.now());
         plan.setReadinessStatus("PREPARING");
+        plan.setLifecycleStatus("IN_PROGRESS");
         plan.setIrrigationSafetyStatus("VERIFIED_SAFE");
 
         // Transition pending automated tasks to IN_PROGRESS
@@ -301,6 +339,19 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 task.setStatus("IN_PROGRESS");
                 task.setExecutedAt(OffsetDateTime.now());
             }
+        }
+
+        // Record status transition
+        if (!"IN_PROGRESS".equals(oldStatus)) {
+            PlanStatusHistory history = PlanStatusHistory.builder()
+                    .planId(plan.getId())
+                    .fromStatus(oldStatus)
+                    .toStatus("IN_PROGRESS")
+                    .changedBy(username)
+                    .reason("Plan confirmed by farmer; implementation actively underway")
+                    .createdAt(OffsetDateTime.now())
+                    .build();
+            planStatusHistoryRepository.save(history);
         }
 
         PlantingPlan saved = planRepository.save(plan);
@@ -334,15 +385,30 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
             targetTask.setStatus("PENDING");
             targetTask.setExecutedAt(null);
         } else {
+            // Check dependencies before allowing completion
+            List<PlantingTaskDependency> dependencies = taskDependencyRepository.findByTaskId(taskId);
+            for (PlantingTaskDependency dep : dependencies) {
+                if ("REQUIRED".equalsIgnoreCase(dep.getDependencyType())) {
+                    PlantingTask prereq = plan.getTasks().stream()
+                            .filter(t -> t.getId().equals(dep.getDependsOnTaskId()))
+                            .findFirst()
+                            .orElse(null);
+                    if (prereq == null || !"COMPLETED".equalsIgnoreCase(prereq.getStatus())) {
+                        throw new ValidationException("DEPENDENCY_VIOLATION: Cannot complete task '" + targetTask.getTitle() + "' because prerequisite task " + (prereq != null ? "'" + prereq.getTitle() + "'" : dep.getDependsOnTaskId()) + " is not completed.");
+                    }
+                }
+            }
             targetTask.setStatus("COMPLETED");
             targetTask.setExecutedAt(OffsetDateTime.now());
         }
         taskRepository.save(targetTask);
 
-        // Recalculate readiness score
+        // Recalculate readiness score and progress percentage
         long completed = plan.getTasks().stream().filter(t -> "COMPLETED".equals(t.getStatus())).count();
-        int score = plan.getTasks().isEmpty() ? 0 : (int) ((completed * 100) / plan.getTasks().size());
+        int total = plan.getTasks().size();
+        int score = total == 0 ? 0 : (int) ((completed * 100) / total);
         plan.setReadinessScore(score);
+        plan.setProgressPercent(score);
         if (score == 100) {
             plan.setReadinessStatus("COMPLETED");
         } else if (score >= 70) {
@@ -360,6 +426,409 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     @Transactional(readOnly = true)
     public List<PlantingPlan> getPlansForField(Long fieldId, Authentication authentication) {
         return planRepository.findByFieldIdOrderByCreatedAtDesc(fieldId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ChatSessionSummaryDto> listUserSessions(Long fieldId, boolean includeArchived, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        List<ChatbotSession> sessions = sessionRepository.searchSessions(username, fieldId, includeArchived);
+
+        List<ChatSessionSummaryDto> summaries = new ArrayList<>();
+        for (ChatbotSession s : sessions) {
+            int msgCount = messageRepository.findBySessionIdOrderByTimestampAsc(s.getSessionId()).size();
+            List<PlanConversationLink> links = planConversationLinkRepository.findBySessionId(s.getSessionId());
+            List<ChatSessionSummaryDto.PlanSnippetDto> planSnippets = new ArrayList<>();
+
+            for (PlanConversationLink link : links) {
+                planRepository.findById(link.getPlanId()).ifPresent(p -> {
+                    planSnippets.add(ChatSessionSummaryDto.PlanSnippetDto.builder()
+                            .planId(p.getId())
+                            .planCode(p.getPlanCode())
+                            .title(p.getTitle() != null ? p.getTitle() : "Cultivation Plan: " + p.getCropName())
+                            .lifecycleStatus(p.getLifecycleStatus() != null ? p.getLifecycleStatus() : "NOT_STARTED")
+                            .progressPercent(p.getProgressPercent() != null ? p.getProgressPercent() : 0)
+                            .build());
+                });
+            }
+
+            // Also check for legacy session_id on planting_plans if not in links
+            if (planSnippets.isEmpty()) {
+                planRepository.findTopBySessionIdOrderByUpdatedAtDesc(s.getSessionId()).ifPresent(p -> {
+                    planSnippets.add(ChatSessionSummaryDto.PlanSnippetDto.builder()
+                            .planId(p.getId())
+                            .planCode(p.getPlanCode())
+                            .title(p.getTitle() != null ? p.getTitle() : "Cultivation Plan: " + p.getCropName())
+                            .lifecycleStatus(p.getLifecycleStatus() != null ? p.getLifecycleStatus() : "NOT_STARTED")
+                            .progressPercent(p.getProgressPercent() != null ? p.getProgressPercent() : 0)
+                            .build());
+                });
+            }
+
+            summaries.add(ChatSessionSummaryDto.builder()
+                    .sessionId(s.getSessionId())
+                    .title(s.getTitle() != null ? s.getTitle() : "Consultation " + s.getSessionId().substring(s.getSessionId().length() - 4))
+                    .userId(s.getUserId())
+                    .fieldId(s.getFieldId())
+                    .currentStep(s.getCurrentStep())
+                    .selectedCrop(s.getSelectedCrop())
+                    .isArchived(s.getIsArchived() != null ? s.getIsArchived() : false)
+                    .createdAt(s.getCreatedAt())
+                    .updatedAt(s.getUpdatedAt())
+                    .lastActivityAt(s.getLastActivityAt() != null ? s.getLastActivityAt() : s.getUpdatedAt())
+                    .messageCount(msgCount)
+                    .planCount(planSnippets.size())
+                    .associatedPlans(planSnippets)
+                    .build());
+        }
+
+        return summaries;
+    }
+
+    @Override
+    @Transactional
+    public ChatSessionSummaryDto archiveSession(String sessionId, boolean archive, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        ChatbotSession session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chat session not found: " + sessionId));
+
+        if (!isAdmin(authentication) && !session.getUserId().equalsIgnoreCase(username)) {
+            throw new AccessDeniedException("FORBIDDEN: You do not have permission to modify this session.");
+        }
+
+        session.setIsArchived(archive);
+        session.setUpdatedAt(OffsetDateTime.now());
+        sessionRepository.save(session);
+
+        recordAuditLog(archive ? "AI_CHAT_SESSION_ARCHIVED" : "AI_CHAT_SESSION_UNARCHIVED", username, "SESSION", sessionId, Map.of("archived", archive));
+
+        return ChatSessionSummaryDto.builder()
+                .sessionId(session.getSessionId())
+                .title(session.getTitle())
+                .userId(session.getUserId())
+                .fieldId(session.getFieldId())
+                .currentStep(session.getCurrentStep())
+                .isArchived(session.getIsArchived())
+                .createdAt(session.getCreatedAt())
+                .updatedAt(session.getUpdatedAt())
+                .lastActivityAt(session.getLastActivityAt())
+                .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PlanDetailDto getPlanDetails(Long planId, Authentication authentication) {
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        return buildPlanDetailDto(plan);
+    }
+
+    @Override
+    @Transactional
+    public PlanDetailDto updatePlanLifecycleStatus(Long planId, PlanStatusUpdateRequest request, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        String targetStatus = request.getStatus() != null ? request.getStatus().trim().toUpperCase() : "";
+
+        Set<String> validStatuses = Set.of("NOT_STARTED", "IN_PROGRESS", "CONTINUED", "COMPLETED", "CANCELLED", "FAILED");
+        if (!validStatuses.contains(targetStatus)) {
+            throw new ValidationException("INVALID_STATUS: Allowed statuses are NOT_STARTED, IN_PROGRESS, CONTINUED, COMPLETED, CANCELLED, FAILED.");
+        }
+
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        String oldStatus = plan.getLifecycleStatus() != null ? plan.getLifecycleStatus() : "NOT_STARTED";
+
+        // Verification requirement for COMPLETED status
+        if ("COMPLETED".equals(targetStatus)) {
+            boolean hasUnfinished = plan.getTasks().stream()
+                    .anyMatch(t -> !"COMPLETED".equalsIgnoreCase(t.getStatus()));
+            if (hasUnfinished) {
+                throw new ValidationException("CANNOT_COMPLETE_PLAN: All implementation tasks must be completed before marking the plan COMPLETED.");
+            }
+            if (request.getCompletionEvidence() != null && !request.getCompletionEvidence().isBlank()) {
+                plan.setCompletionEvidence(request.getCompletionEvidence().trim());
+            }
+            plan.setProgressPercent(100);
+            plan.setReadinessStatus("COMPLETED");
+            plan.setReadinessScore(100);
+        }
+
+        if (("CANCELLED".equals(targetStatus) || "FAILED".equals(targetStatus)) && (request.getReason() == null || request.getReason().isBlank())) {
+            throw new ValidationException("REASON_REQUIRED: A valid reason or explanation must be provided when cancelling or failing a plan.");
+        }
+
+        plan.setLifecycleStatus(targetStatus);
+        plan.setStatusReason(request.getReason());
+        plan.setUpdatedAt(OffsetDateTime.now());
+        planRepository.save(plan);
+
+        // Record status history audit
+        PlanStatusHistory history = PlanStatusHistory.builder()
+                .planId(plan.getId())
+                .fromStatus(oldStatus)
+                .toStatus(targetStatus)
+                .changedBy(username)
+                .reason(request.getReason())
+                .createdAt(OffsetDateTime.now())
+                .build();
+        planStatusHistoryRepository.save(history);
+
+        recordAuditLog("AI_CHAT_PLAN_LIFECYCLE_CHANGED", username, "PLAN", planId.toString(),
+                Map.of("fromStatus", oldStatus, "toStatus", targetStatus, "reason", request.getReason() != null ? request.getReason() : ""));
+
+        return buildPlanDetailDto(plan);
+    }
+
+    @Override
+    @Transactional
+    public FarmingChatResponse linkPlanToSession(Long planId, String sessionId, String linkType, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        String role = resolveRole(authentication);
+
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        ChatbotSession session = sessionRepository.findBySessionId(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chat session not found: " + sessionId));
+
+        if (!planConversationLinkRepository.existsByPlanIdAndSessionId(planId, sessionId)) {
+            PlanConversationLink link = PlanConversationLink.builder()
+                    .planId(planId)
+                    .sessionId(sessionId)
+                    .linkType(linkType != null ? linkType : "RESUMED")
+                    .linkedAt(OffsetDateTime.now())
+                    .build();
+            planConversationLinkRepository.save(link);
+        }
+
+        // If resuming a plan, update session context
+        session.setSelectedCrop(plan.getCropName());
+        session.setPlantingMethod(plan.getPlantingMethod());
+        session.setCurrentStep("PREPARATION_ACTIVE");
+        session.setLastActivityAt(OffsetDateTime.now());
+        session.setUpdatedAt(OffsetDateTime.now());
+        sessionRepository.save(session);
+
+        String resumeReply = String.format("Resumed implementation plan %s (%s). Current progress is %d%% (%s). Review tasks or provide updates.",
+                plan.getPlanCode(), plan.getTitle() != null ? plan.getTitle() : plan.getCropName(), plan.getProgressPercent(), plan.getLifecycleStatus());
+        recordMessage(session.getSessionId(), "ASSISTANT", resumeReply);
+
+        return buildPlanResponse(session, plan, resumeReply, "Plan resumed. Continue execution of pending tasks.", false, role);
+    }
+
+    @Override
+    @Transactional
+    public PlanDetailDto addTaskDependency(Long planId, Long taskId, TaskDependencyRequest request, Authentication authentication) {
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        Long dependsOnTaskId = request.getDependsOnTaskId();
+        if (taskId.equals(dependsOnTaskId)) {
+            throw new ValidationException("INVALID_DEPENDENCY: A task cannot depend on itself.");
+        }
+
+        // Check both tasks belong to this plan
+        boolean taskExists = plan.getTasks().stream().anyMatch(t -> t.getId().equals(taskId));
+        boolean depExists = plan.getTasks().stream().anyMatch(t -> t.getId().equals(dependsOnTaskId));
+        if (!taskExists || !depExists) {
+            throw new ValidationException("INVALID_DEPENDENCY: Both tasks must belong to implementation plan " + planId);
+        }
+
+        // Cycle Detection: Check if dependsOnTaskId already transitively depends on taskId
+        if (hasPath(dependsOnTaskId, taskId)) {
+            throw new ValidationException("CIRCULAR_DEPENDENCY_DETECTED: Adding this dependency would create a circular dependency cycle between task " + taskId + " and " + dependsOnTaskId);
+        }
+
+        if (taskDependencyRepository.findByTaskIdAndDependsOnTaskId(taskId, dependsOnTaskId).isEmpty()) {
+            PlantingTaskDependency dep = PlantingTaskDependency.builder()
+                    .taskId(taskId)
+                    .dependsOnTaskId(dependsOnTaskId)
+                    .dependencyType(request.getDependencyType() != null ? request.getDependencyType() : "REQUIRED")
+                    .createdAt(OffsetDateTime.now())
+                    .build();
+            taskDependencyRepository.save(dep);
+        }
+
+        return buildPlanDetailDto(plan);
+    }
+
+    @Override
+    @Transactional
+    public PlanDetailDto removeTaskDependency(Long planId, Long taskId, Long dependsOnTaskId, Authentication authentication) {
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        taskDependencyRepository.deleteByTaskIdAndDependsOnTaskId(taskId, dependsOnTaskId);
+        return buildPlanDetailDto(plan);
+    }
+
+    @Override
+    @Transactional
+    public PlanDetailDto updateTaskStatus(Long planId, Long taskId, String status, String completionEvidence, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        PlantingPlan plan = planRepository.findById(planId)
+                .orElseThrow(() -> new ResourceNotFoundException("Planting plan not found: " + planId));
+
+        PlantingTask targetTask = plan.getTasks().stream()
+                .filter(t -> t.getId().equals(taskId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Planting task not found: " + taskId));
+
+        String targetStatus = status != null ? status.trim().toUpperCase() : "PENDING";
+        Set<String> validTaskStatuses = Set.of("PENDING", "IN_PROGRESS", "COMPLETED", "BLOCKED", "CANCELLED");
+        if (!validTaskStatuses.contains(targetStatus)) {
+            throw new ValidationException("INVALID_TASK_STATUS: Allowed statuses are PENDING, IN_PROGRESS, COMPLETED, BLOCKED, CANCELLED.");
+        }
+
+        if ("COMPLETED".equals(targetStatus)) {
+            List<PlantingTaskDependency> dependencies = taskDependencyRepository.findByTaskId(taskId);
+            for (PlantingTaskDependency dep : dependencies) {
+                if ("REQUIRED".equalsIgnoreCase(dep.getDependencyType())) {
+                    PlantingTask prereq = plan.getTasks().stream()
+                            .filter(t -> t.getId().equals(dep.getDependsOnTaskId()))
+                            .findFirst()
+                            .orElse(null);
+                    if (prereq == null || !"COMPLETED".equalsIgnoreCase(prereq.getStatus())) {
+                        throw new ValidationException("DEPENDENCY_VIOLATION: Cannot complete task '" + targetTask.getTitle() + "' because prerequisite task " + (prereq != null ? "'" + prereq.getTitle() + "'" : dep.getDependsOnTaskId()) + " is not completed.");
+                    }
+                }
+            }
+            targetTask.setExecutedAt(OffsetDateTime.now());
+            if (completionEvidence != null && !completionEvidence.isBlank()) {
+                targetTask.setCompletionEvidence(completionEvidence.trim());
+            }
+        }
+
+        targetTask.setStatus(targetStatus);
+        targetTask.setUpdatedAt(OffsetDateTime.now());
+        taskRepository.save(targetTask);
+
+        // Recalculate plan progress
+        long completed = plan.getTasks().stream().filter(t -> "COMPLETED".equals(t.getStatus())).count();
+        int total = plan.getTasks().size();
+        int score = total == 0 ? 0 : (int) ((completed * 100) / total);
+        plan.setReadinessScore(score);
+        plan.setProgressPercent(score);
+        if (score == 100) {
+            plan.setReadinessStatus("COMPLETED");
+        } else if (score >= 70) {
+            plan.setReadinessStatus("READY");
+        }
+        planRepository.save(plan);
+
+        recordAuditLog("AI_CHAT_TASK_STATUS_UPDATED", username, "TASK", taskId.toString(), Map.of("planId", planId, "status", targetStatus));
+
+        return buildPlanDetailDto(plan);
+    }
+
+    private boolean hasPath(Long fromTaskId, Long toTaskId) {
+        if (fromTaskId.equals(toTaskId)) return true;
+        Queue<Long> queue = new LinkedList<>();
+        Set<Long> visited = new HashSet<>();
+        queue.add(fromTaskId);
+        visited.add(fromTaskId);
+
+        while (!queue.isEmpty()) {
+            Long current = queue.poll();
+            List<PlantingTaskDependency> deps = taskDependencyRepository.findByTaskId(current);
+            for (PlantingTaskDependency dep : deps) {
+                Long next = dep.getDependsOnTaskId();
+                if (next.equals(toTaskId)) {
+                    return true;
+                }
+                if (!visited.contains(next)) {
+                    visited.add(next);
+                    queue.add(next);
+                }
+            }
+        }
+        return false;
+    }
+
+    private PlanDetailDto buildPlanDetailDto(PlantingPlan plan) {
+        List<PlanConversationLink> links = planConversationLinkRepository.findByPlanId(plan.getId());
+        List<String> sessionIds = links.stream().map(PlanConversationLink::getSessionId).collect(Collectors.toList());
+        if (plan.getSessionId() != null && !sessionIds.contains(plan.getSessionId())) {
+            sessionIds.add(plan.getSessionId());
+        }
+
+        List<PlanStatusHistory> historyList = planStatusHistoryRepository.findByPlanIdOrderByCreatedAtAsc(plan.getId());
+        List<PlanDetailDto.StatusHistoryDto> historyDtos = historyList.stream()
+                .map(h -> PlanDetailDto.StatusHistoryDto.builder()
+                        .id(h.getId())
+                        .fromStatus(h.getFromStatus())
+                        .toStatus(h.getToStatus())
+                        .changedBy(h.getChangedBy())
+                        .reason(h.getReason())
+                        .createdAt(h.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+
+        List<PlanDetailDto.TaskDetailDto> taskDtos = plan.getTasks().stream()
+                .map(t -> {
+                    List<PlantingTaskDependency> deps = taskDependencyRepository.findByTaskId(t.getId());
+                    List<Long> depIds = deps.stream().map(PlantingTaskDependency::getDependsOnTaskId).collect(Collectors.toList());
+                    boolean blockedByPrereq = false;
+                    for (Long prereqId : depIds) {
+                        boolean comp = plan.getTasks().stream()
+                                .anyMatch(other -> other.getId().equals(prereqId) && "COMPLETED".equalsIgnoreCase(other.getStatus()));
+                        if (!comp) {
+                            blockedByPrereq = true;
+                            break;
+                        }
+                    }
+                    boolean isBlocked = "BLOCKED".equalsIgnoreCase(t.getStatus()) ||
+                            "SAFETY_BLOCKED".equalsIgnoreCase(t.getCategory()) ||
+                            blockedByPrereq;
+
+                    return PlanDetailDto.TaskDetailDto.builder()
+                            .id(t.getId())
+                            .planId(plan.getId())
+                            .category(t.getCategory())
+                            .title(t.getTitle())
+                            .description(t.getDescription())
+                            .status(t.getStatus())
+                            .blockingReason(blockedByPrereq ? "Unfinished prerequisite task" : t.getBlockingReason())
+                            .priority(t.getPriority())
+                            .evidenceSource(t.getEvidenceSource())
+                            .completionEvidence(t.getCompletionEvidence())
+                            .deadline(t.getDeadline())
+                            .requiresConfirmation(t.getRequiresConfirmation())
+                            .executedAt(t.getExecutedAt())
+                            .dependsOnTaskIds(depIds)
+                            .isBlocked(isBlocked)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        return PlanDetailDto.builder()
+                .id(plan.getId())
+                .planCode(plan.getPlanCode())
+                .title(plan.getTitle() != null ? plan.getTitle() : "Cultivation Plan: " + plan.getCropName())
+                .description(plan.getDescription())
+                .sessionId(plan.getSessionId())
+                .fieldId(plan.getFieldId())
+                .cropName(plan.getCropName())
+                .plantingMethod(plan.getPlantingMethod())
+                .intendedSchedule(plan.getIntendedSchedule())
+                .lifecycleStatus(plan.getLifecycleStatus() != null ? plan.getLifecycleStatus() : "NOT_STARTED")
+                .progressPercent(plan.getProgressPercent() != null ? plan.getProgressPercent() : 0)
+                .statusReason(plan.getStatusReason())
+                .completionEvidence(plan.getCompletionEvidence())
+                .readinessScore(plan.getReadinessScore())
+                .readinessStatus(plan.getReadinessStatus())
+                .summaryText(plan.getSummaryText())
+                .irrigationSafetyStatus(plan.getIrrigationSafetyStatus())
+                .farmerConfirmed(plan.getFarmerConfirmed())
+                .farmerConfirmedAt(plan.getFarmerConfirmedAt())
+                .createdAt(plan.getCreatedAt())
+                .updatedAt(plan.getUpdatedAt())
+                .tasks(taskDtos)
+                .statusHistory(historyDtos)
+                .associatedSessionIds(sessionIds)
+                .build();
     }
 
     // --- Helper Methods ---
@@ -396,6 +865,9 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .sessionId(sId)
                 .userId(username)
                 .fieldId(fieldId)
+                .title("New Agricultural Consultation")
+                .isArchived(false)
+                .lastActivityAt(OffsetDateTime.now())
                 .currentStep("CROP_SELECTION")
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
@@ -421,11 +893,15 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
         PlantingPlan plan = PlantingPlan.builder()
                 .planCode(planCode)
+                .title(String.format("Cultivation Plan: %s (%s)", crop, session.getPlantingMethod() != null ? session.getPlantingMethod() : "Standard"))
+                .description(String.format("Integrated cultivation and AWD water management plan for %s on Field %d.", crop, fieldId))
                 .sessionId(session.getSessionId())
                 .fieldId(fieldId)
                 .cropName(crop)
                 .plantingMethod(session.getPlantingMethod())
                 .intendedSchedule(session.getIntendedSchedule())
+                .lifecycleStatus("NOT_STARTED")
+                .progressPercent(0)
                 .readinessScore(45)
                 .readinessStatus("ASSESSING")
                 .summaryText(String.format("Planting readiness assessment for %s using %s.", crop, session.getPlantingMethod()))
@@ -556,19 +1032,44 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     }
 
     private FarmingChatResponse buildPlanResponse(ChatbotSession session, PlantingPlan plan, String replyText, String promptQuestion, boolean reqConfirmation, String role) {
+        // Collect dependencies for all tasks in this plan
+        Map<Long, List<Long>> depMap = new HashMap<>();
+        for (PlantingTask t : plan.getTasks()) {
+            List<PlantingTaskDependency> deps = taskDependencyRepository.findByTaskId(t.getId());
+            depMap.put(t.getId(), deps.stream().map(PlantingTaskDependency::getDependsOnTaskId).collect(Collectors.toList()));
+        }
+
         List<FarmingChatResponse.PlantingTaskDto> taskDtos = plan.getTasks().stream()
-                .map(t -> FarmingChatResponse.PlantingTaskDto.builder()
-                        .id(t.getId())
-                        .category(t.getCategory())
-                        .title(t.getTitle())
-                        .description(t.getDescription())
-                        .status(t.getStatus())
-                        .blockingReason(t.getBlockingReason())
-                        .priority(t.getPriority())
-                        .deadline(t.getDeadline() != null ? t.getDeadline().toString() : null)
-                        .evidenceSource(t.getEvidenceSource())
-                        .requiresConfirmation(t.getRequiresConfirmation())
-                        .build())
+                .map(t -> {
+                    List<Long> prerequisites = depMap.getOrDefault(t.getId(), Collections.emptyList());
+                    boolean isBlockedByPrereq = false;
+                    for (Long prereqId : prerequisites) {
+                        boolean completed = plan.getTasks().stream()
+                                .anyMatch(other -> other.getId().equals(prereqId) && "COMPLETED".equalsIgnoreCase(other.getStatus()));
+                        if (!completed) {
+                            isBlockedByPrereq = true;
+                            break;
+                        }
+                    }
+                    boolean blocked = "BLOCKED".equalsIgnoreCase(t.getStatus()) ||
+                            "SAFETY_BLOCKED".equalsIgnoreCase(t.getCategory()) ||
+                            isBlockedByPrereq;
+
+                    return FarmingChatResponse.PlantingTaskDto.builder()
+                            .id(t.getId())
+                            .category(t.getCategory())
+                            .title(t.getTitle())
+                            .description(t.getDescription())
+                            .status(t.getStatus())
+                            .blockingReason(isBlockedByPrereq ? "Prerequisite task unfinished" : t.getBlockingReason())
+                            .priority(t.getPriority())
+                            .deadline(t.getDeadline() != null ? t.getDeadline().toString() : null)
+                            .evidenceSource(t.getEvidenceSource())
+                            .requiresConfirmation(t.getRequiresConfirmation())
+                            .dependsOnTaskIds(prerequisites)
+                            .isBlocked(blocked)
+                            .build();
+                })
                 .collect(Collectors.toList());
 
         List<String> warnings = new ArrayList<>();
@@ -585,6 +1086,9 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .replyText(replyText)
                 .planId(plan.getId())
                 .planCode(plan.getPlanCode())
+                .planTitle(plan.getTitle() != null ? plan.getTitle() : "Cultivation Plan: " + plan.getCropName())
+                .planLifecycleStatus(plan.getLifecycleStatus() != null ? plan.getLifecycleStatus() : "NOT_STARTED")
+                .planProgressPercent(plan.getProgressPercent() != null ? plan.getProgressPercent() : 0)
                 .readinessScore(plan.getReadinessScore())
                 .readinessStatus(plan.getReadinessStatus())
                 .promptQuestion(promptQuestion)

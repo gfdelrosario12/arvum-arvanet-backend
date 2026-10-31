@@ -23,6 +23,12 @@ public class PlantingPlan {
     @Column(name = "plan_code", nullable = false, unique = true, length = 64)
     private String planCode;
 
+    @Column(name = "title", length = 255)
+    private String title;
+
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
     @Column(name = "session_id", length = 64)
     private String sessionId;
 
@@ -37,6 +43,23 @@ public class PlantingPlan {
 
     @Column(name = "intended_schedule", length = 255)
     private String intendedSchedule;
+
+    @Builder.Default
+    @Column(name = "lifecycle_status", nullable = false, length = 50)
+    private String lifecycleStatus = "NOT_STARTED"; // NOT_STARTED, IN_PROGRESS, CONTINUED, COMPLETED, CANCELLED, FAILED
+
+    @Column(name = "objectives_json", columnDefinition = "TEXT")
+    private String objectivesJson;
+
+    @Builder.Default
+    @Column(name = "progress_percent", nullable = false)
+    private Integer progressPercent = 0; // 0 to 100
+
+    @Column(name = "status_reason", columnDefinition = "TEXT")
+    private String statusReason;
+
+    @Column(name = "completion_evidence", columnDefinition = "TEXT")
+    private String completionEvidence;
 
     @Column(name = "readiness_score", nullable = false)
     private Integer readinessScore; // 0 to 100
@@ -66,4 +89,3 @@ public class PlantingPlan {
     @Builder.Default
     private List<PlantingTask> tasks = new ArrayList<>();
 }
-

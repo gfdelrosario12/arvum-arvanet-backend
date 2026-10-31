@@ -17,6 +17,9 @@ public class FarmingChatResponse {
     private String replyText;
     private Long planId;
     private String planCode;
+    private String planTitle;
+    private String planLifecycleStatus;
+    private Integer planProgressPercent;
     private Integer readinessScore;
     private String readinessStatus;
     private String promptQuestion;
@@ -69,5 +72,7 @@ public class FarmingChatResponse {
         private String deadline;
         private String evidenceSource;
         private Boolean requiresConfirmation;
+        private List<Long> dependsOnTaskIds;
+        private Boolean isBlocked;
     }
 }
