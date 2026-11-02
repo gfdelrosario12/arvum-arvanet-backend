@@ -42,6 +42,21 @@ public class FarmingChatResponse {
     private String taskLifecycleStatus;
     private List<WorkflowStepDto> workflowSteps;
 
+    // Model Context Protocol (MCP) Execution Records
+    private List<McpToolExecutionDto> mcpToolExecutions;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class McpToolExecutionDto {
+        private String toolName;
+        private String status; // PENDING, RUNNING, COMPLETED, FAILED, REQUIRES_CONFIRMATION
+        private Double executionTimeMs;
+        private Boolean requiresConfirmation;
+        private String error;
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
