@@ -42,6 +42,15 @@ public class TelemetryReading {
     @Column(name = "unit", nullable = false)
     private String unit;
 
+    @Column(name = "nitrogen_mg_kg")
+    private Double nitrogenMgKg;
+
+    @Column(name = "phosphorus_mg_kg")
+    private Double phosphorusMgKg;
+
+    @Column(name = "potassium_mg_kg")
+    private Double potassiumMgKg;
+
     @Column(name = "timestamp", nullable = false)
     private LocalDateTime timestamp;
 

@@ -31,7 +31,7 @@ public final class TelemetryValidator {
             case SOIL_MOISTURE, HUMIDITY -> value >= 0.0 && value <= 100.0;
             case TEMPERATURE -> value >= -40.0 && value <= 80.0; // DHT22 rated range
             case WATER_LEVEL_DISTANCE -> value == 0.0 || (value >= ULTRASONIC_MIN_CM && value <= ULTRASONIC_MAX_CM);
-            case WATER_FLOW, PRESSURE, BATTERY_VOLTAGE -> value >= 0.0;
+            case WATER_FLOW, PRESSURE, BATTERY_VOLTAGE, SOIL_NITROGEN, SOIL_PHOSPHORUS, SOIL_POTASSIUM, SOIL_NPK_COMPOSITE -> value >= 0.0;
         };
     }
 

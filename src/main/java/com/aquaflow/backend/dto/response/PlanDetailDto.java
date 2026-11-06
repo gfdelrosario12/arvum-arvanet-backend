@@ -48,6 +48,7 @@ public class PlanDetailDto {
         private String category;
         private String title;
         private String description;
+        private String tillageStage;
         private String status;
         private String blockingReason;
         private String priority;

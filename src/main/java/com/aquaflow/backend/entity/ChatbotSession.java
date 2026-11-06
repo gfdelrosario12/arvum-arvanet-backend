@@ -57,4 +57,11 @@ public class ChatbotSession {
 
     @Column(name = "metadata_json", columnDefinition = "TEXT")
     private String metadataJson;
+
+    @Column(name = "session_working_config_json", columnDefinition = "TEXT")
+    private String sessionWorkingConfigJson;
+
+    @Builder.Default
+    @Column(name = "config_confirmed_by_farmer")
+    private Boolean configConfirmedByFarmer = false;
 }

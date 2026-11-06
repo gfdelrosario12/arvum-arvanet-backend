@@ -4,6 +4,7 @@ import com.aquaflow.backend.dto.request.FarmingChatMessageRequest;
 import com.aquaflow.backend.dto.request.PlanStatusUpdateRequest;
 import com.aquaflow.backend.dto.request.TaskDependencyRequest;
 import com.aquaflow.backend.dto.response.ChatSessionSummaryDto;
+import com.aquaflow.backend.dto.response.FarmConfigurationDto;
 import com.aquaflow.backend.dto.response.FarmingChatResponse;
 import com.aquaflow.backend.dto.response.PlanDetailDto;
 import com.aquaflow.backend.entity.*;
@@ -39,6 +40,8 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     private final PlanConversationLinkRepository planConversationLinkRepository;
     private final PlanStatusHistoryRepository planStatusHistoryRepository;
     private final PlantingTaskDependencyRepository taskDependencyRepository;
+    private final FarmConfigurationRepository farmConfigurationRepository;
+    private final com.aquaflow.backend.domain.agri.TillageWorkflowManager tillageWorkflowManager;
     private final ObjectMapper objectMapper;
 
     public static final String INITIAL_QUESTION = "Hi, I am Arva, what do you like to plant today?";
@@ -911,94 +914,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .updatedAt(OffsetDateTime.now())
                 .build();
 
-        List<PlantingTask> tasks = new ArrayList<>();
-
-        // Category 1: SYSTEM_AUTOMATED (Authorized pre-soak irrigation)
-        tasks.add(PlantingTask.builder()
-                .plantingPlan(plan)
-                .category("SYSTEM_AUTOMATED")
-                .title("Pre-Irrigation Land Soaking")
-                .description("Deliver controlled 3.0 cm water layer across terrace zones via ArvaCore automated valves.")
-                .status(isEStopActive ? "BLOCKED" : "PENDING")
-                .priority("HIGH")
-                .evidenceSource("PhilRice PalayCheck AWD Standard")
-                .blockingReason(isEStopActive ? "Emergency stop is active" : null)
-                .requiresConfirmation(true)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build());
-
-        tasks.add(PlantingTask.builder()
-                .plantingPlan(plan)
-                .category("SYSTEM_AUTOMATED")
-                .title("Ultrasonic Water Table Zero-Point Calibration")
-                .description("Verify reference perched water table baseline across all 6 ArvaNodes before puddling.")
-                .status("PENDING")
-                .priority("NORMAL")
-                .evidenceSource("ArvaNode Ultrasonic Sensor Array")
-                .requiresConfirmation(false)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build());
-
-        // Category 2: FARMER_MANUAL
-        tasks.add(PlantingTask.builder()
-                .plantingPlan(plan)
-                .category("FARMER_MANUAL")
-                .title("Plowing and Primary Harrowing")
-                .description("Incorporate crop residue and break clods to 15-20 cm soil depth.")
-                .status("PENDING")
-                .priority("NORMAL")
-                .evidenceSource("PhilRice Land Preparation Protocol")
-                .requiresConfirmation(false)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build());
-
-        tasks.add(PlantingTask.builder()
-                .plantingPlan(plan)
-                .category("FARMER_MANUAL")
-                .title("Paddy Bund Sealing & Rat Hole Plastering")
-                .description("Compact perimeter bunds with mud to prevent water leakage during AWD cycles.")
-                .status("PENDING")
-                .priority("NORMAL")
-                .evidenceSource("IRRI AWD Field Water Seepage Management")
-                .requiresConfirmation(false)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build());
-
-        // Category 3: EQUIPMENT_INFO
-        tasks.add(PlantingTask.builder()
-                .plantingPlan(plan)
-                .category("EQUIPMENT_INFO")
-                .title("Certified Seed Availability Check")
-                .description("Verify NSIC Rc 222 certified seed germination rate (>85%) and seed treatment.")
-                .status("PENDING")
-                .priority("NORMAL")
-                .evidenceSource("DA-BPI Certified Seed Standard")
-                .requiresConfirmation(false)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build());
-
-        // Category 4: SAFETY_BLOCKED (Condition dependent)
-        if (isEStopActive) {
-            tasks.add(PlantingTask.builder()
-                    .plantingPlan(plan)
-                    .category("SAFETY_BLOCKED")
-                    .title("Clear Active Emergency Stop")
-                    .description("The main irrigation circuit is in Emergency Stop. Deactivate E-Stop to enable pump actuation.")
-                    .status("BLOCKED")
-                    .priority("CRITICAL_PREREQUISITE")
-                    .evidenceSource("ArvaCore Hardware Interlock")
-                    .blockingReason("Physical Emergency Stop latch is engaged.")
-                    .requiresConfirmation(true)
-                    .createdAt(OffsetDateTime.now())
-                    .updatedAt(OffsetDateTime.now())
-                    .build());
-        }
-
+        List<PlantingTask> tasks = tillageWorkflowManager.buildEightStageTillageTasks(plan, isEStopActive);
         plan.setTasks(tasks);
         return plan;
     }
@@ -1028,6 +944,10 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .authorizedCapabilities(getCapabilitiesForRole(role))
                 .taskLifecycleStatus(lifecycle)
                 .workflowSteps(buildCanonicalWorkflowSteps(step, null))
+                .farmConfiguration(resolveActiveFarmConfiguration(session, session.getFieldId() != null ? session.getFieldId() : 1L))
+                .isSessionConfigurationAdjusted(session.getSessionWorkingConfigJson() != null && !session.getSessionWorkingConfigJson().isBlank())
+                .isConfigurationConfirmed(Boolean.TRUE.equals(session.getConfigConfirmedByFarmer()))
+                .activeTillageStage(null)
                 .build();
     }
 
@@ -1060,6 +980,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                             .category(t.getCategory())
                             .title(t.getTitle())
                             .description(t.getDescription())
+                            .tillageStage(t.getTillageStage())
                             .status(t.getStatus())
                             .blockingReason(isBlockedByPrereq ? "Prerequisite task unfinished" : t.getBlockingReason())
                             .priority(t.getPriority())
@@ -1105,6 +1026,78 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .authorizedCapabilities(getCapabilitiesForRole(role))
                 .taskLifecycleStatus(lifecycle)
                 .workflowSteps(buildCanonicalWorkflowSteps(step, plan))
+                .farmConfiguration(resolveActiveFarmConfiguration(session, plan.getFieldId() != null ? plan.getFieldId() : 1L))
+                .isSessionConfigurationAdjusted(session != null && session.getSessionWorkingConfigJson() != null && !session.getSessionWorkingConfigJson().isBlank())
+                .isConfigurationConfirmed(session != null && Boolean.TRUE.equals(session.getConfigConfirmedByFarmer()))
+                .activeTillageStage(resolveActiveTillageStage(plan))
+                .build();
+    }
+
+    private String resolveActiveTillageStage(PlantingPlan plan) {
+        if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
+            return "PRIMARY_PLOWING";
+        }
+        for (PlantingTask t : plan.getTasks()) {
+            if (!"COMPLETED".equalsIgnoreCase(t.getStatus()) && t.getTillageStage() != null) {
+                return t.getTillageStage();
+            }
+        }
+        return "CROP_ESTABLISHMENT";
+    }
+
+    private FarmConfigurationDto resolveActiveFarmConfiguration(ChatbotSession session, Long fieldId) {
+        FarmConfiguration config = farmConfigurationRepository.findByFieldIdAndIsActiveTrue(fieldId)
+                .or(() -> farmConfigurationRepository.findByFieldId(fieldId))
+                .orElse(null);
+
+        if (config == null) {
+            return FarmConfigurationDto.builder()
+                    .fieldId(fieldId)
+                    .farmName("Silang Terraced Rice Field")
+                    .geographicalLocation("Barangay Silang, Lopez, Quezon (13.8821° N, 121.9906° E)")
+                    .totalAreaHectares(1.1)
+                    .pitakCount(6)
+                    .soilType("Calumpang Clay (Macolod Series)")
+                    .soilCharacteristics("Heavy clay, plow pan at 15-20 cm depth, slow percolation.")
+                    .waterSources(List.of("NIA Canal", "Deep Well Submersible Pump", "Rainfall"))
+                    .equipmentInventory(List.of("Hand Tractor", "Moldboard Plow", "Comb Harrow", "Wooden Leveling Plank"))
+                    .isActive(true)
+                    .build();
+        }
+
+        List<String> waterSources = new ArrayList<>();
+        List<String> equipment = new ArrayList<>();
+        try {
+            if (config.getWaterSourcesJson() != null) {
+                waterSources = objectMapper.readValue(config.getWaterSourcesJson(), List.class);
+            }
+            if (config.getEquipmentInventoryJson() != null) {
+                equipment = objectMapper.readValue(config.getEquipmentInventoryJson(), List.class);
+            }
+        } catch (Exception ignored) {}
+
+        if (session != null && session.getSessionWorkingConfigJson() != null && !session.getSessionWorkingConfigJson().isBlank()) {
+            try {
+                Map<String, Object> workingMap = objectMapper.readValue(session.getSessionWorkingConfigJson(), Map.class);
+                if (workingMap.containsKey("farmName")) config.setFarmName((String) workingMap.get("farmName"));
+                if (workingMap.containsKey("soilType")) config.setSoilType((String) workingMap.get("soilType"));
+                if (workingMap.containsKey("soilCharacteristics")) config.setSoilCharacteristics((String) workingMap.get("soilCharacteristics"));
+            } catch (Exception ignored) {}
+        }
+
+        return FarmConfigurationDto.builder()
+                .id(config.getId())
+                .fieldId(config.getFieldId())
+                .farmName(config.getFarmName())
+                .geographicalLocation(config.getGeographicalLocation())
+                .totalAreaHectares(config.getTotalAreaHectares())
+                .pitakCount(config.getPitakCount())
+                .soilType(config.getSoilType())
+                .soilCharacteristics(config.getSoilCharacteristics())
+                .waterSources(waterSources)
+                .equipmentInventory(equipment)
+                .isActive(config.getIsActive())
+                .updatedAt(config.getUpdatedAt())
                 .build();
     }
 

@@ -57,6 +57,9 @@ public class PlantingTask {
     @Column(name = "associated_irrigation_command_id", length = 64)
     private String associatedIrrigationCommandId;
 
+    @Column(name = "tillage_stage", length = 50)
+    private String tillageStage; // PRIMARY_PLOWING, DECOMPOSITION_SUBMERGENCE, FIRST_HARROWING, SECOND_HARROWING, THIRD_HARROWING, LAND_LEVELING, FINAL_READINESS, CROP_ESTABLISHMENT
+
     @Column(name = "deadline")
     private OffsetDateTime deadline;
 

@@ -55,6 +55,8 @@ class FarmingChatbotServiceTest {
         planConversationLinkRepository = mock(PlanConversationLinkRepository.class);
         planStatusHistoryRepository = mock(PlanStatusHistoryRepository.class);
         taskDependencyRepository = mock(PlantingTaskDependencyRepository.class);
+        FarmConfigurationRepository farmConfigurationRepository = mock(FarmConfigurationRepository.class);
+        com.aquaflow.backend.domain.agri.TillageWorkflowManager tillageWorkflowManager = new com.aquaflow.backend.domain.agri.TillageWorkflowManager();
         objectMapper = new ObjectMapper();
 
         chatbotService = new FarmingChatbotServiceImpl(
@@ -68,6 +70,8 @@ class FarmingChatbotServiceTest {
                 planConversationLinkRepository,
                 planStatusHistoryRepository,
                 taskDependencyRepository,
+                farmConfigurationRepository,
+                tillageWorkflowManager,
                 objectMapper
         );
 

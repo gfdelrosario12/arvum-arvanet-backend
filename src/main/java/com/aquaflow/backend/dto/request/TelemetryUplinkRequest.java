@@ -37,6 +37,9 @@ public class TelemetryUplinkRequest {
     private String gatewayId;
     private Double frequency;
     private String telemetryStatus;
+    private Double nitrogenMgKg;
+    private Double phosphorusMgKg;
+    private Double potassiumMgKg;
     private Map<String, String> sensorHealth;
     private Map<String, Double> measurements;
 

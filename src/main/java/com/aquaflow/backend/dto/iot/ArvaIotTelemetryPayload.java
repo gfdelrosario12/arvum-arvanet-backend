@@ -41,6 +41,9 @@ public class ArvaIotTelemetryPayload {
     private Double batteryVoltage;
     private Double batteryLevel;
     private Double solarVoltage;
+    private Double nitrogenMgKg;
+    private Double phosphorusMgKg;
+    private Double potassiumMgKg;
 
     // Diagnostic & Sensor Status Container
     private Map<String, String> sensorStatus;
@@ -64,6 +67,9 @@ public class ArvaIotTelemetryPayload {
         private Double batteryVoltage;
         private Double batteryLevel;
         private Double solarVoltage;
+        private Double nitrogenMgKg;
+        private Double phosphorusMgKg;
+        private Double potassiumMgKg;
     }
 
     @Data

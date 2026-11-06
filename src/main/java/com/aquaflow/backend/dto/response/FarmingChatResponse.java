@@ -45,6 +45,12 @@ public class FarmingChatResponse {
     // Model Context Protocol (MCP) Execution Records
     private List<McpToolExecutionDto> mcpToolExecutions;
 
+    // Farm Configuration State (Canonical & Session Working Overrides)
+    private FarmConfigurationDto farmConfiguration;
+    private Boolean isSessionConfigurationAdjusted;
+    private Boolean isConfigurationConfirmed;
+    private String activeTillageStage; // PRIMARY_PLOWING, DECOMPOSITION_SUBMERGENCE, FIRST_HARROWING, SECOND_HARROWING, THIRD_HARROWING, LAND_LEVELING, FINAL_READINESS, CROP_ESTABLISHMENT
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -81,6 +87,7 @@ public class FarmingChatResponse {
         private String category;
         private String title;
         private String description;
+        private String tillageStage;
         private String status;
         private String blockingReason;
         private String priority;
