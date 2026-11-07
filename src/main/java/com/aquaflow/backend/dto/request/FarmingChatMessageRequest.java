@@ -21,5 +21,6 @@ public class FarmingChatMessageRequest {
     private String plantingMethod;
     private String intendedSchedule;
     private java.util.Map<String, Object> formData;
+    private String clientMessageId;
 }
 

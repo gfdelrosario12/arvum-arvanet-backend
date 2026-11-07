@@ -32,5 +32,8 @@ public class ChatbotMessage {
 
     @Column(name = "structured_payload_json", columnDefinition = "TEXT")
     private String structuredPayloadJson;
+
+    @Column(name = "client_message_id", length = 64)
+    private String clientMessageId;
 }
 

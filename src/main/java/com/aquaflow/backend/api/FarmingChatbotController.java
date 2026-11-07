@@ -25,6 +25,14 @@ public class FarmingChatbotController {
 
     private final FarmingChatbotService chatbotService;
 
+    @PostMapping("/sessions")
+    public ResponseEntity<FarmingChatResponse> createSession(
+            @RequestBody(required = false) com.aquaflow.backend.dto.request.CreateChatSessionRequest request,
+            Authentication authentication) {
+        log.info("POST /api/v1/farming-chat/sessions by authenticated user {}", authentication != null ? authentication.getName() : "ANONYMOUS");
+        return ResponseEntity.ok(chatbotService.createSession(request, authentication));
+    }
+
     @PostMapping("/message")
     public ResponseEntity<FarmingChatResponse> sendMessage(
             @Valid @RequestBody FarmingChatMessageRequest request,

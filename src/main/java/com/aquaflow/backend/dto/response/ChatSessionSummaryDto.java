@@ -20,6 +20,9 @@ public class ChatSessionSummaryDto {
     private String currentStep;
     private String selectedCrop;
     private Boolean isArchived;
+    private String status;
+    private String summary;
+    private String workflowId;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
     private OffsetDateTime lastActivityAt;

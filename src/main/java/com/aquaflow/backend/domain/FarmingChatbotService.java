@@ -12,6 +12,7 @@ import org.springframework.security.core.Authentication;
 import java.util.List;
 
 public interface FarmingChatbotService {
+    FarmingChatResponse createSession(com.aquaflow.backend.dto.request.CreateChatSessionRequest request, Authentication authentication);
     FarmingChatResponse processMessage(FarmingChatMessageRequest request, Authentication authentication);
     FarmingChatResponse getSessionState(String sessionId, Authentication authentication);
     FarmingChatResponse resetSession(String sessionId, Long fieldId, Authentication authentication);

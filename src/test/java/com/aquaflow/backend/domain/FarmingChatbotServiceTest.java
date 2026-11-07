@@ -237,4 +237,61 @@ class FarmingChatbotServiceTest {
         assertTrue(resp.getReplyText().contains("Destructive Operation Intercepted"));
         assertTrue(resp.getWarnings().contains("Destructive operational request intercepted and refused in chat."));
     }
+
+    @Test
+    void testCreateSessionImmediatePersistence() {
+        when(sessionRepository.save(any(ChatbotSession.class))).thenAnswer(invocation -> {
+            ChatbotSession s = invocation.getArgument(0);
+            return s;
+        });
+
+        com.aquaflow.backend.dto.request.CreateChatSessionRequest createReq = com.aquaflow.backend.dto.request.CreateChatSessionRequest.builder()
+                .fieldId(1L)
+                .title("Lowland Rice Season 2026")
+                .selectedCrop("NSIC Rc 222")
+                .workflowId("WF-PREP-01")
+                .build();
+
+        FarmingChatResponse resp = chatbotService.createSession(createReq, farmerAuth);
+
+        assertNotNull(resp);
+        assertNotNull(resp.getSessionId());
+        assertTrue(resp.getSessionId().startsWith("chat-sess-"));
+        assertEquals("CROP_SELECTION", resp.getCurrentStep());
+        assertEquals("Hi, I am Arva, what do you like to plant today?", resp.getReplyText());
+
+        // Verify session and initial greeting were persisted immediately
+        verify(sessionRepository, atLeastOnce()).save(any(ChatbotSession.class));
+        verify(messageRepository, times(1)).save(any(com.aquaflow.backend.entity.ChatbotMessage.class));
+    }
+
+    @Test
+    void testMessageDeduplicationWithClientMessageId() {
+        ChatbotSession session = ChatbotSession.builder()
+                .sessionId("sess-dedup")
+                .userId("MrFarmer")
+                .currentStep("CROP_SELECTION")
+                .build();
+
+        when(sessionRepository.findBySessionId("sess-dedup")).thenReturn(Optional.of(session));
+        when(messageRepository.findBySessionIdAndClientMessageId("sess-dedup", "client-msg-123"))
+                .thenReturn(Optional.of(com.aquaflow.backend.entity.ChatbotMessage.builder()
+                        .id(100L)
+                        .sessionId("sess-dedup")
+                        .clientMessageId("client-msg-123")
+                        .messageText("Hello")
+                        .sender("USER")
+                        .build()));
+
+        FarmingChatMessageRequest req = FarmingChatMessageRequest.builder()
+                .sessionId("sess-dedup")
+                .message("Hello")
+                .clientMessageId("client-msg-123")
+                .build();
+
+        FarmingChatResponse resp = chatbotService.processMessage(req, farmerAuth);
+        assertNotNull(resp);
+        // Verify duplicate message is not saved again
+        verify(messageRepository, never()).save(argThat(m -> "USER".equals(m.getSender()) && "client-msg-123".equals(m.getClientMessageId())));
+    }
 }

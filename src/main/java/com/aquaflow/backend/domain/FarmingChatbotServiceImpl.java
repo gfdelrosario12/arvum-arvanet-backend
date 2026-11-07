@@ -4,6 +4,7 @@ import com.aquaflow.backend.dto.request.FarmingChatMessageRequest;
 import com.aquaflow.backend.dto.request.PlanStatusUpdateRequest;
 import com.aquaflow.backend.dto.request.TaskDependencyRequest;
 import com.aquaflow.backend.dto.response.ChatSessionSummaryDto;
+import com.aquaflow.backend.dto.response.ChatbotMessageDto;
 import com.aquaflow.backend.dto.response.FarmConfigurationDto;
 import com.aquaflow.backend.dto.response.FarmingChatResponse;
 import com.aquaflow.backend.dto.response.PlanDetailDto;
@@ -49,6 +50,33 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
 
     @Override
     @Transactional
+    public FarmingChatResponse createSession(com.aquaflow.backend.dto.request.CreateChatSessionRequest request, Authentication authentication) {
+        String username = resolveUsername(authentication);
+        String role = resolveRole(authentication);
+        Long fieldId = (request != null && request.getFieldId() != null) ? request.getFieldId() : 1L;
+
+        ChatbotSession session = createNewSession(username, fieldId);
+        if (request != null) {
+            if (request.getTitle() != null && !request.getTitle().isBlank()) {
+                session.setTitle(request.getTitle().trim());
+            }
+            if (request.getSelectedCrop() != null && !request.getSelectedCrop().isBlank()) {
+                session.setSelectedCrop(request.getSelectedCrop().trim());
+            }
+            if (request.getWorkflowId() != null && !request.getWorkflowId().isBlank()) {
+                session.setWorkflowId(request.getWorkflowId().trim());
+            }
+            session = sessionRepository.save(session);
+        }
+
+        // Record initial greeting from Assistant immediately so new sessions are never empty
+        recordMessage(session.getSessionId(), "ASSISTANT", INITIAL_QUESTION);
+
+        return buildBaseResponse(session, INITIAL_QUESTION, INITIAL_QUESTION, false, role);
+    }
+
+    @Override
+    @Transactional
     public FarmingChatResponse processMessage(FarmingChatMessageRequest request, Authentication authentication) {
         String username = resolveUsername(authentication);
         String role = resolveRole(authentication);
@@ -83,7 +111,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
         }
 
         // Record incoming user message
-        recordMessage(session.getSessionId(), "USER", msg);
+        recordMessage(session.getSessionId(), "USER", msg, request.getClientMessageId());
         session.setLastActivityAt(OffsetDateTime.now());
         session.setUpdatedAt(OffsetDateTime.now());
         if ("New Agricultural Consultation".equals(session.getTitle()) && !msg.isBlank()) {
@@ -476,6 +504,9 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                     .currentStep(s.getCurrentStep())
                     .selectedCrop(s.getSelectedCrop())
                     .isArchived(s.getIsArchived() != null ? s.getIsArchived() : false)
+                    .status(s.getStatus() != null ? s.getStatus() : "ACTIVE")
+                    .summary(s.getSummary())
+                    .workflowId(s.getWorkflowId())
                     .createdAt(s.getCreatedAt())
                     .updatedAt(s.getUpdatedAt())
                     .lastActivityAt(s.getLastActivityAt() != null ? s.getLastActivityAt() : s.getUpdatedAt())
@@ -879,10 +910,21 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
     }
 
     private void recordMessage(String sessionId, String sender, String text) {
+        recordMessage(sessionId, sender, text, null);
+    }
+
+    private void recordMessage(String sessionId, String sender, String text, String clientMessageId) {
+        if (clientMessageId != null && !clientMessageId.isBlank()) {
+            if (messageRepository.findBySessionIdAndClientMessageId(sessionId, clientMessageId).isPresent()) {
+                log.info("Ignoring duplicate message submission for session {} with clientMessageId {}", sessionId, clientMessageId);
+                return;
+            }
+        }
         ChatbotMessage msg = ChatbotMessage.builder()
                 .sessionId(sessionId)
                 .sender(sender)
                 .messageText(text)
+                .clientMessageId(clientMessageId)
                 .timestamp(OffsetDateTime.now())
                 .build();
         messageRepository.save(msg);
@@ -919,6 +961,24 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
         return plan;
     }
 
+    private List<ChatbotMessageDto> getSessionMessages(String sessionId) {
+        List<ChatbotMessage> msgs = messageRepository.findBySessionIdOrderByTimestampAsc(sessionId);
+        if (msgs == null || msgs.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return msgs.stream()
+                .map(m -> ChatbotMessageDto.builder()
+                        .id(m.getId())
+                        .sessionId(m.getSessionId())
+                        .sender(m.getSender())
+                        .messageText(m.getMessageText())
+                        .timestamp(m.getTimestamp())
+                        .structuredPayloadJson(m.getStructuredPayloadJson())
+                        .clientMessageId(m.getClientMessageId())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
     private FarmingChatResponse buildBaseResponse(ChatbotSession session, String replyText, String promptQuestion, boolean reqConfirmation, String role) {
         return buildBaseResponse(session, replyText, promptQuestion, reqConfirmation, role, null);
     }
@@ -948,6 +1008,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .isSessionConfigurationAdjusted(session.getSessionWorkingConfigJson() != null && !session.getSessionWorkingConfigJson().isBlank())
                 .isConfigurationConfirmed(Boolean.TRUE.equals(session.getConfigConfirmedByFarmer()))
                 .activeTillageStage(null)
+                .messages(getSessionMessages(session.getSessionId()))
                 .build();
     }
 
@@ -1030,6 +1091,7 @@ public class FarmingChatbotServiceImpl implements FarmingChatbotService {
                 .isSessionConfigurationAdjusted(session != null && session.getSessionWorkingConfigJson() != null && !session.getSessionWorkingConfigJson().isBlank())
                 .isConfigurationConfirmed(session != null && Boolean.TRUE.equals(session.getConfigConfirmedByFarmer()))
                 .activeTillageStage(resolveActiveTillageStage(plan))
+                .messages(session != null ? getSessionMessages(session.getSessionId()) : getSessionMessages(plan.getSessionId()))
                 .build();
     }
 

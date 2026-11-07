@@ -62,6 +62,16 @@ public class ChatbotSession {
     private String sessionWorkingConfigJson;
 
     @Builder.Default
+    @Column(name = "status", nullable = false, length = 50)
+    private String status = "ACTIVE"; // ACTIVE, COMPLETED, ARCHIVED, TERMINATED
+
+    @Column(name = "summary", columnDefinition = "TEXT")
+    private String summary;
+
+    @Column(name = "workflow_id", length = 64)
+    private String workflowId;
+
+    @Builder.Default
     @Column(name = "config_confirmed_by_farmer")
     private Boolean configConfirmedByFarmer = false;
 }

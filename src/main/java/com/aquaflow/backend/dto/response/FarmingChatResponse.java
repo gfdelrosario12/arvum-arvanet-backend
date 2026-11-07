@@ -51,6 +51,9 @@ public class FarmingChatResponse {
     private Boolean isConfigurationConfirmed;
     private String activeTillageStage; // PRIMARY_PLOWING, DECOMPOSITION_SUBMERGENCE, FIRST_HARROWING, SECOND_HARROWING, THIRD_HARROWING, LAND_LEVELING, FINAL_READINESS, CROP_ESTABLISHMENT
 
+    // Full conversation message history loaded from database
+    private List<ChatbotMessageDto> messages;
+
     @Data
     @Builder
     @NoArgsConstructor
